@@ -1,3 +1,96 @@
+/* Style */
+:root {
+    --ink: #1a1612;
+    --ink-soft: #4a3f33;
+    --rule: #cdbfa6;
+    --rule-soft: #e3d6bd;
+    --accent: #a23e1b;
+    --accent-soft: #d4a78a;
+    --node: #ffffff;
+    --node-stroke: #1a1612;
+    --node-active: #a23e1b;
+    --node-replica: #6b8e4e;
+    --node-muted: #8a7e6e;
+    --code-bg: #ede4d2;
+    --max-width: 720px;
+  }
+  /* Figures */
+  figure {
+    margin: 40px 0;
+    padding: 0;
+  }
+  figure svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-width: 100%;
+  }
+  figcaption {
+    font-style: italic;
+    font-size: 16px;
+    text-align: center;
+    margin-top: 14px;
+    line-height: 1.4;
+  }
+  figcaption .fig-num {
+    font-style: normal;
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    margin-right: 8px;
+  }
+  /* SVG diagram defaults */
+.diagram { background: var(--bg-card); padding: 24px; border: 1px solid var(--rule-soft); }
+  .diagram text {
+    font-family: 'JetBrains Mono', monospace;
+    fill: var(--ink);
+  }
+  .diagram .label { font-size: 11px; font-weight: 500; }
+  .diagram .label-sm { font-size: 9px; }
+  .diagram .annot {
+    font-family: 'Instrument Serif', Georgia, serif;
+    font-style: italic;
+    font-size: 13px;
+    fill: var(--ink-soft);
+  }
+  .diagram .node {
+    fill: var(--node);
+    stroke: var(--node-stroke);
+    stroke-width: 1.2;
+  }
+  .diagram .node-active {
+    fill: var(--accent);
+    stroke: var(--accent);
+  }
+  .diagram .node-replica {
+    fill: var(--node-replica);
+    stroke: var(--node-replica);
+  }
+  .diagram .node-muted {
+    fill: var(--bg);
+    stroke: var(--node-muted);
+    stroke-width: 1;
+    stroke-dasharray: 3 2;
+  }
+  .diagram .arrow {
+    stroke: var(--ink);
+    stroke-width: 1.2;
+    fill: none;
+  }
+  .diagram .arrow-soft {
+    stroke: var(--ink-soft);
+    stroke-width: 0.8;
+    fill: none;
+    stroke-dasharray: 3 3;
+  }
+  .diagram .rack {
+    fill: none;
+    stroke: var(--node-muted);
+    stroke-width: 1;
+    stroke-dasharray: 4 3;
+  }
+  .diagram .text-white { fill: white; }
+
 <h2>Why we can't just buy a <em>bigger machine</em></h2>
 
 <p>you have spent the last two years writing programs that fit on one machine. You have learned how to do this more efficiently by multiprocessing in python and using  GPUs in machine learning. Those are both single-machine answers to "my program is too slow." So before we start talking about clusters, lets ask the honest question. Why isn't a single, very fast machine enough?</p>
