@@ -1,4 +1,4 @@
-# SD411 Lab 1 — Lab Environment Test
+# Lab 1 — Lab Environment Test
 
 **Week 1 (Thu, 20 Aug 2026)**
 **Due:** before the start of Lab 2 (Thu, 27 Aug 2026)
@@ -20,7 +20,7 @@ and writes back. If everything works, you are cleared for Lab 2.
 
 By the end of this lab you will be able to:
 
-1. Describe what each service in the SD411 stack does and which port it
+1. Describe what each service in the stack does and which port it
    listens on.
 2. Bring the stack up, tear it down, and inspect a misbehaving container
    using only `docker compose` commands.
@@ -36,12 +36,6 @@ By the end of this lab you will be able to:
 ### Step 1.1 — Download the files
 
 Open a terminal(CTRL-ALT-t) and navigate to the lab01 directory.
-
-```bash
-cd ~/sd411
-unzip ~/Downloads/lab01.zip
-cd lab01
-```
 
 ## One-time JAR download
 
