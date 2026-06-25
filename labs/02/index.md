@@ -285,7 +285,7 @@ part is not which is faster on your VM; it is that the application code is
 identical and only the URI changed. Hold that thought for Unit 2, where
 this indifference is what makes decoupled compute-and-storage work.
 
-## 7. Deliverables, oral check, and rubric
+## 7. Deliverables
 
 Submit, as one folder or archive per the course submission convention:
 
