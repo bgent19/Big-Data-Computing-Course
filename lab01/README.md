@@ -1,4 +1,4 @@
-# Lab 1 — Lab Environment Test
+# SD411 Lab 1 -- Lab Environment Test
 
 **Week 1 (Thu, 20 Aug 2026)**
 **Due:** before the start of Lab 2 (Thu, 27 Aug 2026)
@@ -20,7 +20,7 @@ and writes back. If everything works, you are cleared for Lab 2.
 
 By the end of this lab you will be able to:
 
-1. Describe what each service in the stack does and which port it
+1. Describe what each service in the SD411 stack does and which port it
    listens on.
 2. Bring the stack up, tear it down, and inspect a misbehaving container
    using only `docker compose` commands.
@@ -31,51 +31,69 @@ By the end of this lab you will be able to:
 
 ---
 
-## Part 1 — Bring up the stack
+## Part 0 -- VM provisioning check
 
-### Step 1.1 — Download the files
+Your VM comes pre-provisioned by the course's `vm-base` image. This lab does
+**not** download or build the Spark/S3A JARs itself -- they, along with the
+season's seed data, are already staged on your VM before the term starts.
+Confirm the provisioning landed before you touch Docker:
 
-Open a terminal(CTRL-ALT-t) and navigate to the lab01 directory.
+| # | Check | Command | Expected |
+| - | --- | --- | --- |
+| 1 | S3A connector JARs staged | `ls /opt/sd411/jars/` | `hadoop-aws-3.3.4.jar` and `aws-java-sdk-bundle-1.12.262.jar` |
+| 2 | Seed dataset staged | `ls /opt/sd411/data/` | the season CSV (ask your instructor for the exact filename if unsure) |
 
-## One-time JAR download
+If either is missing, **stop and notify your instructor**.
 
-Spark needs the S3A connector (two JARs) to read from MinIO. The natural
-way to fetch them is `spark-submit --packages`, which uses Maven over
-HTTPS from inside the container. On the USNA network that fails: the
-container's Java truststore does not trust the institution's TLS
-interception CA, so Maven Central downloads die with `PKIX path
-building failed`.
+---
 
-The workaround is to download the JARs on the host instead. The host's
-curl uses the system CA bundle, which does include the institutional
-root, so the download works.
+## Prerequisites
+
+At the beginning of the lab session, verify each of these on your VM. If any fail, notify your instructor.
+
+| # | Check | Command | Expected |
+| - | --- | --- | --- |
+| 1 | Docker installed | `docker --version` | `Docker version 24.x` or newer |
+| 2 | Compose v2 plugin | `docker compose version` | `Docker Compose version v2.x` |
+| 3 | You can run docker without sudo | `docker ps` | a header line, no error |
+| 4 | Free disk for images | `df -BG ~ \| tail -1` | at least 10G free |
+| 5 | Ports free | `ss -lntp \| egrep ':(7077\|8080\|8081\|9000\|9001) '` | empty output |
+| 6 | Outbound HTTPS works | `curl -sI https://hub.docker.com \| head -1` | `HTTP/2 200` |
+| 7 | Git available | `git --version` | any recent version |
+| 8 | System CA bundle present | `ls /etc/ssl/certs/ca-certificates.crt` | file exists |
+
+If check 3 fails: `sudo usermod -aG docker $USER`, then log out and back in.
+If check 5 fails: something on your VM is already using one of those ports.
+Stop it.
+
+---
+
+## Part 1 -- Bring up the stack
+
+### Step 1.1 -- Download the files
+
+Download the [lab 01 files](lab01.zip), then open a terminal(CTRL-ALT-t).
 
 ```bash
-bash scripts/download_jars.sh
+cd ~/sd411
+unzip ~/Downloads/lab01.zip
+cd lab01
 ```
 
-This is a one-time step. The `./jars/` directory is `.gitignore`d so the
-data stays local to your machine. The compose file mounts that
-directory into the Spark containers at `/opt/spark/extra-jars`, and
-Part 3 will tell `spark-submit` to use those JARs directly.
+You should have:
 
-### Step 1.2 — Confirm the lab files are present
-
-```bash
-ls -la
-# You should see:
-#   docker-compose.yml
-#   scripts/verify_stack.sh
-#   scripts/hello_statcast.py
-#   scripts/download_jars.sh
-#   data/statcast_sample.csv  # the seed dataset
-#   jars/                     # populated by JAR download
+```
+docker-compose.yml
+.env
+scripts/verify_stack.sh
+scripts/hello_statcast.py
 ```
 
-If `data/statcast_sample.csv` is missing, ask the instructor. The rest of
-the lab depends on it being seeded into MinIO.
+`.env` is the copy of the course-wide
+`common.env` stamped for this lab; it's what fills in the image tags, ports,
+and credentials in `docker-compose.yml`. You should not need to edit it.
 
-### Step 1.3 — Bring the stack up
+### Step 1.2 -- Bring the stack up
 
 ```bash
 docker compose up -d
@@ -84,7 +102,7 @@ docker compose up -d
 What you should observe (over 1–5 min the first time, faster afterwards):
 
 1. Image pulls (`apache/spark:3.5.3-python3`, `minio/minio:...`,
-   `minio/mc:...`). First-time download of the Spark image is ~1.2 GB.
+   `minio/mc:...`). Your VM should have these images pre-pulled.
 2. Four containers created: `sd411-spark-master`, `sd411-spark-worker`,
    `sd411-minio`, `sd411-minio-init`.
 3. The first three transition to `running`; the fourth (`minio-init`) is
@@ -98,7 +116,7 @@ docker compose ps
 
 You should see three services `running` and you may see `sd411-minio-init` as `exited (0)`.
 
-### Step 1.4 — Open the UIs in a browser
+### Step 1.3 -- Open the UIs in a browser
 
 Confirm each of these loads in your VM's browser:
 
@@ -109,21 +127,22 @@ Confirm each of these loads in your VM's browser:
 | <http://localhost:9001> | MinIO console. Log in: `sd411admin` / `sd411password`. |
 
 In the MinIO console, click into the `sd411` bucket → `raw/`. You should
-see `statcast_sample.csv`. If not, run the recovery from **Part 1.5**.
+see the seed CSV named in `/opt/sd411/data/` on your VM (Part 0, check 2).
+If not, run the recovery from **Part 1.4**.
 
-### Step 1.5 — Recovery: if `minio-init` failed
+### Step 1.4 -- Recovery: if `minio-init` failed
 
 If `docker compose ps` shows `sd411-minio-init` with a non-zero exit code:
 
 ```bash
 docker logs sd411-minio-init        # read the error
-# Common cause: data/statcast_sample.csv is missing. Fix that, then:
+# Common cause: the seed CSV is missing from /opt/sd411/data (Part 0). Fix that, then:
 docker compose up -d --force-recreate minio-init
 ```
 
 ---
 
-## Part 2 — Verify (5 min)
+## Part 2 -- Verify (5 min)
 
 Run the verification script:
 
@@ -146,23 +165,17 @@ own root cause whenever possible.
 
 ---
 
-## Part 3 — Hello Statcast
+## Part 3 -- Hello Statcast
 
-You will now run a tiny PySpark job that reads `statcast_sample.csv` from
+You will now run a tiny PySpark job that reads the seeded Statcast CSV from
 MinIO, computes pitch counts and average velocity per pitch type, and
 writes the result back to MinIO as Parquet.
 
-### Step 3.1 — Stage the script into the work directory
+### Step 3.1 -- Make the one required edit
 
-```bash
-cp scripts/hello_statcast.py work/hello_statcast.py
-```
-
-(The `work/` directory is mounted into the Spark containers as `/opt/work`.)
-
-### Step 3.2 — Make the one required edit
-
-Open `work/hello_statcast.py` in your editor. Find the line:
+`scripts/` is bind-mounted **read-only** into the containers, but that only
+blocks writes from inside the container -- you still edit the file normally
+on the host. Open `scripts/hello_statcast.py` in your editor. Find the line:
 
 ```python
 YOUR_ALPHA = "REPLACE_ME"
@@ -173,12 +186,12 @@ is the only edit you are required to make. It puts your output under a
 path unique to you, which is how the instructor confirms during the lab
 check that the script actually ran on your stack.
 
-### Step 3.3 — Run it
+### Step 3.2 -- Run it
 
 ```bash
 docker exec -it sd411-spark-master spark-submit \
     --jars /opt/spark/extra-jars/hadoop-aws-3.3.4.jar,/opt/spark/extra-jars/aws-java-sdk-bundle-1.12.262.jar \
-    /opt/work/hello_statcast.py
+    /opt/lab01/scripts/hello_statcast.py
 ```
 
 Expected output (abridged):
@@ -187,8 +200,8 @@ Expected output (abridged):
 Spark version:  3.5.3
 Master:         spark://spark-master:7077
 ============================================================
-Loaded s3a://sd411/raw/statcast_sample.csv
-  Rows:    4,488
+Loaded s3a://sd411/raw/<seed CSV>
+  Rows:    <thousands>
   Columns: 119
   First 10 columns / types:
     pitch_type                string
@@ -225,13 +238,13 @@ cases legitimately have no pitch_type). If your breakdown shows only
 two or three pitch types, you are probably running the synthetic
 fallback rather than real data: flag this to the instructor.
 
-### Step 3.4 — Confirm the write in the MinIO console
+### Step 3.3 -- Confirm the write in the MinIO console
 
 Refresh the MinIO console. Navigate to `sd411` → `derived/<your alpha>/`.
 You should see `pitch_type_summary/` containing one or more `.parquet`
 files plus a `_SUCCESS` marker. Take a screenshot.
 
-### Step 3.5 — Confirm the standalone cluster ran the job
+### Step 3.4 -- Confirm the standalone cluster ran the job
 
 Browse to the Spark master UI at <http://localhost:8080>. Under
 **Completed Applications**, you should see `sd411-lab01-hello-statcast`.
@@ -242,30 +255,7 @@ flag the issue.
 
 ---
 
-## Stuck? Help protocol
-
-When you've been on the same failure for 20 minutes:
-
-1. **Re-read the prerequisite section** and verify each item.
-2. **Run `./scripts/verify_stack.sh` again** and read the output carefully.
-   Most failures are explicitly diagnosed there.
-3. **Capture three things** before asking for help:
-   - The output of `./scripts/verify_stack.sh`
-   - The output of `docker compose ps`
-   - The last 50 lines of the offending container's logs:
-     `docker logs --tail 50 <container-name>`
-4. **Ask a classmate** at a similar point in the lab. Discussion of
-   approach and Spark UI observations is encouraged. Sharing or copying
-   code is not. (See the Collaboration section of the course policy.)
-5. **Ask the instructor** in lab, or via the course channel out of lab.
-   Bring the three artifacts from step 4.
-
-If a classmate helped you fix it, you cite that in your AI/collaboration
-statement (Part 4). That's not a penalty. It's how this course works.
-
----
-
-## Part 4 — Submit
+## Part 4 -- Submit
 
 Submit a single zip file named `sd411_lab01_<alpha>.zip` containing:
 
@@ -282,7 +272,7 @@ Submit a single zip file named `sd411_lab01_<alpha>.zip` containing:
 ### `report.md` template (~1 page)
 
 ```
-# SD411 Lab 1 — <Your name, alpha>
+# SD411 Lab 1 -- <Your name, alpha>
 
 ## What I built
 2–4 sentences describing what's running on your VM and how the four
@@ -306,7 +296,7 @@ how Spark scheduled the work?
 ### `ai_usage.md` template
 
 ```
-# AI usage — SD411 Lab 1
+# AI usage -- SD411 Lab 1
 
 Tool(s) used:    e.g., Claude, ChatGPT, Copilot, GitHub Copilot Chat, or "none"
 Used for:        what you asked it about (debugging, explanation, syntax, ...)

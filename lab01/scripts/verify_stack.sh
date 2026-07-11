@@ -1,11 +1,22 @@
 #!/usr/bin/env bash
-# SD411 Lab 0 — Stack Verification
+# SD411 Lab 1 — Stack Verification
 # Runs a series of named checks against the running course stack.
 # Exit code 0 = all PASS; non-zero = at least one FAIL.
 #
 # Run from the repo root:  ./scripts/verify_stack.sh
 
 set -u  # treat unset vars as errors; do NOT set -e — we want all checks to run.
+
+# Source the stamped .env if present so ${SEED_CSV}, ${MC_IMAGE},
+# ${HADOOP_AWS_VERSION}, ${AWS_SDK_BUNDLE_VERSION}, and MinIO creds resolve
+# to the same values Compose uses. The env-var references below fall back
+# to safe defaults if .env is missing so the script still runs.
+if [ -f "$(dirname "$0")/../.env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . "$(dirname "$0")/../.env"
+  set +a
+fi
 
 # --- colors (degrade gracefully if tput missing or no tty) ---
 if [ -t 1 ]; then
@@ -115,22 +126,22 @@ fi
 # 'sh -c ...' as args silently fails (mc treats 'sh' as an unknown subcommand).
 # Capture stderr too so a future failure surfaces a real diagnostic.
 bucket_listing=$(docker run --rm --network sd411-net \
-  -e MC_HOST_local="http://sd411admin:sd411password@minio:9000" \
-  minio/mc:RELEASE.2024-11-21T17-21-54Z \
-  ls local/sd411/raw/ 2>&1)
-if echo "$bucket_listing" | grep -q "statcast_sample.csv"; then
-  pass "bucket 'sd411' contains raw/statcast_sample.csv"
+  -e MC_HOST_local="http://${MINIO_ROOT_USER:-sd411admin}:${MINIO_ROOT_PASSWORD:-sd411password}@minio:9000" \
+  "${MC_IMAGE:-minio/mc:RELEASE.2025-04-16T18-13-26Z}" \
+  ls "local/${S3_BUCKET:-sd411}/raw/" 2>&1)
+if echo "$bucket_listing" | grep -q "${SEED_CSV:-statcast_2025.csv}"; then
+  pass "bucket '${S3_BUCKET:-sd411}' contains raw/${SEED_CSV:-statcast_2025.csv}"
 else
-  fail "bucket 'sd411' missing the seeded sample"
+  fail "bucket '${S3_BUCKET:-sd411}' missing the seeded sample (${SEED_CSV:-statcast_2025.csv})"
   # Show what mc actually said so the failure is debuggable.
   echo "$bucket_listing" | head -3 | sed 's/^/       mc: /'
-  info "Check ./data/statcast_sample.csv exists, then:"
+  info "Confirm \$SD411_DATA/\$SEED_CSV exists on the host, then:"
   info "  docker compose up -d --force-recreate minio-init"
 fi
 
 # --- 11. Worker registered with master ---
 worker_count=$(curl -s --max-time 5 http://localhost:8080/json/ 2>/dev/null \
-  | grep -o '"aliveworkers" : [0-9]*' | grep -o '[0-9]*' || echo 0)
+  | grep -o '"aliveworkers"[[:space:]]*:[[:space:]]*[0-9]*' | grep -o '[0-9]*$' || echo 0)
 if [ -n "${worker_count:-}" ] && [ "$worker_count" -ge 1 ]; then
   pass "Spark master shows $worker_count worker(s) registered"
 else
@@ -138,22 +149,25 @@ else
   info "Logs: docker logs sd411-spark-worker"
 fi
 
-# --- 12. S3A connector JARs present (offline workaround for Maven SSL) ---
-# Because --packages fails behind USNA's TLS-inspecting proxy (Java truststore
-# doesn't carry the institutional CA), we pre-download the JARs on the host
-# and mount them into the Spark containers. Lab 0 step 3.3 uses --jars to
-# reference them.
-JARS_DIR="$(cd "$(dirname "$0")/.." && pwd)/jars"
-REQUIRED_JARS=("hadoop-aws-3.3.4.jar" "aws-java-sdk-bundle-1.12.262.jar")
+# --- 12. S3A connector JARs visible inside the Spark container ---
+# In v1.6 the JARs live at $SD411_JARS on the VM (populated by vm-base's
+# provisioner), mounted into the container at /opt/spark/extra-jars. Test
+# the container-side path so we verify both provisioning AND the mount.
+HAWS="hadoop-aws-${HADOOP_AWS_VERSION:-3.3.4}.jar"
+ASDK="aws-java-sdk-bundle-${AWS_SDK_BUNDLE_VERSION:-1.12.262}.jar"
 missing_jars=()
-for j in "${REQUIRED_JARS[@]}"; do
-  [ -f "$JARS_DIR/$j" ] || missing_jars+=("$j")
+for j in "$HAWS" "$ASDK"; do
+  if ! docker exec sd411-spark-master test -f "/opt/spark/extra-jars/$j" 2>/dev/null; then
+    missing_jars+=("$j")
+  fi
 done
 if [ "${#missing_jars[@]}" -eq 0 ]; then
-  pass "S3A connector JARs present in ./jars/"
+  pass "S3A connector JARs visible at /opt/spark/extra-jars/ in the container"
 else
-  fail "${#missing_jars[@]} of ${#REQUIRED_JARS[@]} S3A JAR(s) missing: ${missing_jars[*]}"
-  info "Run: ./scripts/download_jars.sh"
+  fail "${#missing_jars[@]} of 2 required JAR(s) missing from container mount"
+  info "Missing: ${missing_jars[*]}"
+  info "The vm-base provisioner populates \$SD411_JARS on VM setup."
+  info "If missing, ask the sysadmin or re-run vm-base/scripts/download_jars.sh."
 fi
 
 echo "${BOLD}==========================================${RESET}"

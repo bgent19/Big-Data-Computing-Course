@@ -1,0 +1,165 @@
+# =============================================================================
+# SD411 — docker-compose.base.yml
+# Canonical, dry-run-verified service definitions. Labs do NOT copy these;
+# they INHERIT them so a fix lands everywhere at once.
+#
+# How a lab uses this (lab compose lives one dir below vm-base):
+#
+#   services:
+#     spark-master:
+#       extends:
+#         file: ../vm-base/docker-compose.base.yml
+#         service: spark-master
+#     spark-worker:
+#       extends:
+#         file: ../vm-base/docker-compose.base.yml
+#         service: spark-worker
+#       depends_on: [spark-master]          # depends_on is NOT inherited; declare it
+#     minio:
+#       extends: { file: ../vm-base/docker-compose.base.yml, service: minio }
+#     minio-init:
+#       extends: { file: ../vm-base/docker-compose.base.yml, service: minio-init }
+#       depends_on: { minio: { condition: service_healthy } }
+#       # base init only creates buckets; a lab that seeds an object overrides
+#       # `command:` here with its own mc cp after the mb calls.
+#
+# Compose `extends` notes:
+#   - merges environment, ports, volumes, image, command, healthcheck, working_dir
+#   - does NOT merge depends_on or networks — declare those in the lab file
+#   - requires the lab compose to define the `sd411-net` network and any
+#     named volumes it references (minio-data, spark-work) so teardown is clean
+#
+# Work-directory rule (permission-denied fix):
+#   The spark services run as root (user 0:0) and write spark-warehouse/ and
+#   metastore_db/ into their working dir. That dir is the NAMED VOLUME
+#   `spark-work`, never a host bind mount, so no root-owned files ever appear
+#   on the host. Students' scripts are bind-mounted READ-ONLY in each lab file
+#   (`- ./scripts:/opt/<labN>/scripts:ro`); they edit on the host and submit
+#   with `docker compose exec`. Do NOT bind-mount a writable host `work/`.
+#
+# Every value below comes from common.env via the lab's stamped .env.
+# =============================================================================
+
+services:
+
+  # --- Spark standalone master --------------------------------------------
+  spark-master:
+    image: ${SPARK_IMAGE}
+    # apache/spark has no SPARK_MODE wrapper; invoke the class directly.
+    command: >
+      /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
+      --host spark-master --port 7077 --webui-port 8080
+    # UID 185 in the image collides with bind-mount ownership; run as root.
+    # Acceptable for a course VM, NEVER for production.
+    user: "0:0"
+    environment:
+      # docker exec loads no profile and the image does not symlink binaries
+      # into /usr/bin, so spark-submit/spark-class need PATH set explicitly.
+      PATH: "/opt/spark/bin:/opt/spark/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+      SPARK_DAEMON_MEMORY: ${SPARK_DAEMON_MEM}
+      SPARK_NO_DAEMONIZE: "true"
+    ports:
+      - "${PORT_SPARK_MASTER_UI}:8080"
+      - "${PORT_SPARK_MASTER}:7077"
+      # Driver UIs land on the node hosting the driver; exposed here because
+      # shell-driven labs (Lab 3+) run the driver alongside the master.
+      - "${PORT_DRIVER_UI}:4040"
+      - "${PORT_DRIVER_UI_ALT}:4041"
+    # Spark writes spark-warehouse/ and metastore_db/ into its working dir.
+    # Point that at a NAMED VOLUME (below), never a host bind mount, so a
+    # root container (user 0:0) never leaves root-owned files on the host.
+    working_dir: /opt/spark/work
+    volumes:
+      # Host-fetched S3A connector JARs, mounted at the path the labs --jars.
+      - ${SD411_JARS}:/opt/spark/extra-jars:ro
+      # Container scratch (warehouse, derby) — Docker-managed, host never touches it.
+      - spark-work:/opt/spark/work
+      # Lab-file convention (declared in each lab, NOT here, because the host
+      # ./scripts path and the container mount path are lab-specific):
+      #   - ./scripts:/opt/<labN>/scripts:ro
+      # Read-only means the root container can run the student's scripts but
+      # cannot write into the student's editable directory. Host edits still
+      # flow through live; :ro only blocks the container side.
+    healthcheck:
+      # apache/spark ships without curl; probe the UI port over /dev/tcp.
+      test: ["CMD", "bash", "-c", "</dev/tcp/127.0.0.1/8080"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  # --- Spark standalone worker --------------------------------------------
+  spark-worker:
+    image: ${SPARK_IMAGE}
+    command: >
+      /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker
+      spark://spark-master:7077 --webui-port 8081
+    user: "0:0"
+    environment:
+      PATH: "/opt/spark/bin:/opt/spark/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+      # org.apache.spark...Worker reads these as defaults when --cores/--memory
+      # are not passed. Course-wide sizing lives in common.env.
+      SPARK_WORKER_CORES: ${WORKER_CORES}
+      SPARK_WORKER_MEMORY: ${WORKER_MEM}
+      SPARK_DAEMON_MEMORY: ${SPARK_DAEMON_MEM}
+      SPARK_NO_DAEMONIZE: "true"
+    ports:
+      - "${PORT_SPARK_WORKER_UI}:8081"
+    working_dir: /opt/spark/work
+    volumes:
+      - ${SD411_JARS}:/opt/spark/extra-jars:ro
+      - spark-work:/opt/spark/work
+    healthcheck:
+      test: ["CMD", "bash", "-c", "</dev/tcp/127.0.0.1/8081"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  # --- MinIO object store (S3-compatible) ---------------------------------
+  minio:
+    image: ${MINIO_IMAGE}
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    ports:
+      - "${PORT_MINIO_API}:9000"
+      - "${PORT_MINIO_CONSOLE}:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "bash", "-c", "</dev/tcp/127.0.0.1/9000"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  # --- One-shot bucket bootstrap ------------------------------------------
+  minio-init:
+    image: ${MC_IMAGE}
+    # minio/mc has `mc` as ENTRYPOINT, so a bare `command:` would run as an
+    # mc subcommand. Override entrypoint to a shell to script multiple calls.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        mc mb --ignore-existing "local/$${S3_BUCKET}"
+        mc mb --ignore-existing "local/$${S3_LANDING_BUCKET}"
+        echo "buckets ready: $${S3_BUCKET}, $${S3_LANDING_BUCKET}"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_LANDING_BUCKET: ${S3_LANDING_BUCKET}
+    restart: "no"
+
+volumes:
+  # Lab files that extend `minio` must also declare this volume (kept
+  # lab-local so `docker compose down -v` in one lab does not wipe another).
+  minio-data:
+  # Container scratch for the Spark services. Named (not a host bind mount)
+  # so a root container never leaves root-owned files on the host; a lab that
+  # extends the spark services must declare this volume too.
+  spark-work:

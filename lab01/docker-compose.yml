@@ -1,0 +1,111 @@
+# SD411 Big Data Computing — lab01 (Smoke Test) Stack
+# Version: 1.6 — extends: base pass (2026-07-02)
+#
+# All service definitions are inherited from vm-base/docker-compose.base.yml.
+# This file only carries what is genuinely lab-scoped: the scripts mount,
+# the seed step in minio-init, and the redeclarations that Compose's
+# extends: does not merge (depends_on, networks, top-level volumes).
+#
+# What is inherited from base:
+#   * apache/spark:3.5.3-python3 image (via $SPARK_IMAGE)
+#   * root user, PATH env, working_dir /opt/spark/work
+#   * master and worker command lines with explicit ports
+#   * bash /dev/tcp healthchecks
+#   * host port mappings (via $PORT_* vars)
+#   * MinIO image, credentials, and bucket-creation logic
+#   * S3A JARs mounted from $SD411_JARS (=/opt/sd411/jars)
+#   * spark-work named volume for executor scratch
+#
+# What is added here:
+#   * ./scripts:/opt/lab01/scripts:ro    read-only script mount
+#   * minio-init COMMAND override         seeds raw/$SEED_CSV after mb calls
+#   * ./data mount into minio-init        (via $SD411_DATA), read-only
+#   * depends_on, networks, container_name, top-level volumes
+#     (Compose does NOT merge these across extends: boundaries)
+#
+# Requires (all populated by vm-base provisioner, verified in Part 0):
+#   * ./.env stamped from ../vm-base/common.env (via scripts/sync_env.sh)
+#   * /opt/sd411/jars/*.jar populated
+#   * /opt/sd411/data/$SEED_CSV present
+#
+# Maintained by: LT Brett Gentile, USN  <bgentile@usna.edu>
+
+name: sd411-lab01
+
+services:
+
+  spark-master:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: spark-master
+    container_name: sd411-spark-master
+    volumes:
+      # Merged with base's $SD411_JARS and spark-work mounts.
+      - ./scripts:/opt/lab01/scripts:ro
+    networks: [sd411-net]
+
+  spark-worker:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: spark-worker
+    container_name: sd411-spark-worker
+    depends_on:
+      spark-master:
+        condition: service_healthy
+    volumes:
+      - ./scripts:/opt/lab01/scripts:ro
+    networks: [sd411-net]
+
+  minio:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: minio
+    container_name: sd411-minio
+    networks: [sd411-net]
+
+  minio-init:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: minio-init
+    container_name: sd411-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks: [sd411-net]
+    volumes:
+      # vm-base provisions the shared data dir; minio-init reads the seed
+      # CSV from here and copies it into the sd411 bucket.
+      - ${SD411_DATA}:/seed:ro
+    environment:
+      SEED_CSV: ${SEED_CSV}
+    # Override base's bucket-only command to also copy the seed file.
+    # $$ escapes Compose's own substitution so the shell inside the
+    # container resolves these against its own env (populated above and
+    # inherited from base's environment block).
+    command:
+      - |
+        set -e
+        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        mc mb --ignore-existing "local/$${S3_BUCKET}"
+        mc mb --ignore-existing "local/$${S3_LANDING_BUCKET}"
+        if [ -f "/seed/$${SEED_CSV}" ]; then
+          mc cp "/seed/$${SEED_CSV}" "local/$${S3_BUCKET}/raw/$${SEED_CSV}"
+          echo "seeded raw/$${SEED_CSV}"
+        else
+          echo "WARN: /seed/$${SEED_CSV} not found; bucket has no seed object"
+        fi
+        echo "buckets ready: $${S3_BUCKET}, $${S3_LANDING_BUCKET}"
+
+networks:
+  sd411-net:
+    driver: bridge
+    name: sd411-net
+
+# Lab-scoped named volumes. Compose does not merge top-level volumes across
+# extends: boundaries; these must be declared here for the base's mount
+# refs (spark-work, minio-data) to resolve.
+volumes:
+  minio-data:
+    name: sd411-lab01-minio-data
+  spark-work:
+    name: sd411-lab01-spark-work
