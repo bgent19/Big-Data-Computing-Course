@@ -1,0 +1,176 @@
+# =============================================================================
+# SD411 lab02 -- HDFS vs MinIO: explore, measure, predict   (session R2)
+# =============================================================================
+# Reconciled against the lab reconciliation tracker, step 3 (the lever):
+# every shared service now INHERITS from vm-base/docker-compose.base.yml, and
+# every tag / credential / bucket / size resolves from common.env via the
+# stamped .env. Nothing below hardcodes an image tag, a credential, or a
+# worker size. If you find one, lift it into common.env.
+#
+# What the extends: conversion bought this lab, in one pass:
+#   - F1 image parity ......... spark services inherit ${SPARK_IMAGE}
+#   - JAR centralization ...... inherited ${SD411_JARS} -> /opt/spark/extra-jars
+#                               (lab-local download_jars.sh is DELETED)
+#   - workdir fix ............. inherited spark-work named volume + working_dir
+#   - mc / MinIO pins ......... ${MINIO_IMAGE} / ${MC_IMAGE} from common.env
+#
+# extends: gotchas that bit us before, do not "clean these up":
+#   - networks are NOT inherited. Every service re-declares sd411-net.
+#   - depends_on is NOT inherited. Re-declared where needed.
+#   - volumes MERGE. The ro mounts below ADD to the inherited ones.
+#
+# Prereqs:
+#   ../vm-base/docker-compose.base.yml present
+#   ./.env stamped from common.env   ->  ../scripts/sync_env.sh
+#   Only ONE sd411 stack runs at a time (shared host ports).
+#   Switching from lab01?  ../scripts/sd411_down_all.sh
+#
+# Bring-up:                 docker compose up -d
+# Bring-up incl. stretch:   docker compose --profile spark up -d
+# Tear-down (wipe data):    docker compose down -v
+# =============================================================================
+
+name: lab02
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # HDFS NameNode -- all metadata, no data. One of these. That is the point.
+  # LAB-SPECIFIC: HDFS is not in vm-base (lab02 is the only lab that runs it),
+  # so these two services are declared in full rather than extended.
+  # ---------------------------------------------------------------------------
+  namenode:
+    image: ${HADOOP_IMAGE}
+    container_name: lab02-namenode
+    hostname: namenode
+    command: ["hdfs", "namenode"]
+    ports:
+      - "${PORT_HDFS_NN_UI}:9870"          # NameNode web UI
+      - "${PORT_HDFS_RPC:-8020}:8020"      # NameNode RPC
+    environment:
+      ENSURE_NAMENODE_DIR: "/tmp/hadoop-hadoop/dfs/name"
+      CORE-SITE.XML_fs.defaultFS: "hdfs://namenode:8020"
+      # ONE DataNode in this stack, so replication factor 1. Worksheet 1.2 asks
+      # students why 3 is impossible here. Do not "fix" this to 3.
+      HDFS-SITE.XML_dfs.replication: "1"
+      # Aggressive failure detection so the Part 3 drill resolves in ~30-60 s
+      # instead of the production default of 10 min 30 s (worksheet E4.c).
+      HDFS-SITE.XML_dfs.heartbeat.interval: "1"
+      HDFS-SITE.XML_dfs.namenode.heartbeat.recheck-interval: "10000"
+      HDFS-SITE.XML_dfs.permissions.enabled: "false"
+      HADOOP_HEAPSIZE_MAX: "${SPARK_DAEMON_MEM}"
+    user: "0:0"
+    volumes:
+      - ${SD411_DATA}:/seed:ro             # shared provisioned seed (big file)
+      - ./data:/labdata:ro                 # locally generated small-files corpus. NOT /data: apache/hadoop's entrypoint force-chmods /data on every start, which crash-loops the container whenever anything is bind-mounted there. mc's /data mount is unaffected (different image/entrypoint).
+      - namenode-meta:/tmp/hadoop-hadoop/dfs
+    networks: [sd411-net]
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # HDFS DataNode -- all data, no metadata. You will kill this one on purpose.
+  # ---------------------------------------------------------------------------
+  datanode:
+    image: ${HADOOP_IMAGE}
+    container_name: lab02-datanode
+    hostname: datanode
+    command: ["hdfs", "datanode"]
+    ports:
+      - "${PORT_HDFS_DN_UI:-9864}:9864"    # DataNode web UI
+    environment:
+      CORE-SITE.XML_fs.defaultFS: "hdfs://namenode:8020"
+      HDFS-SITE.XML_dfs.replication: "1"
+      HDFS-SITE.XML_dfs.heartbeat.interval: "1"
+      HDFS-SITE.XML_dfs.namenode.heartbeat.recheck-interval: "10000"
+      HADOOP_HEAPSIZE_MAX: "${SPARK_DAEMON_MEM}"
+    user: "0:0"
+    volumes:
+      - datanode-blocks:/tmp/hadoop-hadoop/dfs
+    depends_on: [namenode]
+    networks: [sd411-net]
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # MinIO -- S3-compatible object store. Image, credentials, and ports all come
+  # from the base + common.env, so they cannot drift away from the other labs.
+  # ---------------------------------------------------------------------------
+  minio:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: minio
+    networks: [sd411-net]                  # not inherited
+
+  # ---------------------------------------------------------------------------
+  # minio-init -- one-shot bucket bootstrap. The base command creates
+  # ${S3_BUCKET} and ${S3_LANDING_BUCKET} and stops. We deliberately do NOT
+  # override the command to pre-seed an object: in this lab the students time
+  # the uploads themselves (E2), so the buckets must start EMPTY.
+  # ---------------------------------------------------------------------------
+  minio-init:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: minio-init
+    depends_on:
+      minio:
+        condition: service_healthy         # not inherited
+    networks: [sd411-net]
+
+  # ---------------------------------------------------------------------------
+  # mc -- long-lived MinIO client for the hands-on exploration and the timed
+  # experiments. Kept alive (entrypoint overridden) rather than run one-shot,
+  # because `docker compose run` startup overhead (~0.5-1 s) would swamp the
+  # very effect E1 is trying to measure.
+  #
+  # MC_HOST_local pre-registers the alias, so there is no `mc alias set` step
+  # for students to typo. NOTE: `mc` is the image ENTRYPOINT, so shell-wrapping
+  # patterns silently false-fail; `docker compose exec` bypasses ENTRYPOINT and
+  # runs the command given, which is why the README's exec forms work.
+  # ---------------------------------------------------------------------------
+  mc:
+    image: ${MC_IMAGE}
+    container_name: lab02-mc
+    entrypoint: ["sleep", "infinity"]
+    environment:
+      MC_HOST_local: "http://${MINIO_ROOT_USER}:${MINIO_ROOT_PASSWORD}@minio:9000"
+    volumes:
+      - ${SD411_DATA}:/seed:ro
+      - ./data:/data:ro
+    depends_on: [minio]
+    networks: [sd411-net]
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # STRETCH GOAL ONLY (profile: spark). Read the same bytes through hdfs:// and
+  # s3a:// with identical code.
+  #
+  # Everything that used to be hand-maintained here -- the apache/spark image,
+  # user 0:0, the explicit spark-class command, the PATH fix, the S3A JAR mount,
+  # the work-dir named volume -- is now INHERITED from the base. The lab-local
+  # download_jars.sh is gone: the JARs are provisioned once on the VM at
+  # ${SD411_JARS} and the base mounts them at /opt/spark/extra-jars.
+  # ---------------------------------------------------------------------------
+  spark-master:
+    profiles: ["spark"]
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: spark-master
+    networks: [sd411-net]                  # not inherited
+    volumes:                               # MERGED with the inherited mounts
+      - ./scripts:/opt/lab02/scripts:ro
+
+  spark-worker:
+    profiles: ["spark"]
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: spark-worker
+    depends_on: [spark-master]             # not inherited
+    networks: [sd411-net]
+
+networks:
+  sd411-net:
+
+volumes:
+  namenode-meta:
+  datanode-blocks:
+  minio-data:
+  spark-work:
