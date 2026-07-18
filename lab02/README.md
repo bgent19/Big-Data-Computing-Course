@@ -56,7 +56,7 @@ the pinned images, the MinIO credentials, and the worker sizing; nothing in
 the compose file is hardcoded):
 
 ```
-../vm-base/scripts/sync_env.sh
+../vm-base/scripts/sync_env.sh ~
 ```
 
 Build the small-files corpus. Note what this script does *not* do: it does

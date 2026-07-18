@@ -1,0 +1,124 @@
+# =============================================================================
+# SD411 Lab 3 -- Build and Measure: CSV vs Parquet on Statcast
+# =============================================================================
+# RECONCILED to the coordinated-pass end state (Step 3 of the reconciliation
+# sequence). This file no longer hardcodes an image tag, credential, bucket,
+# or worker size. Everything is inherited:
+#   - F1 image + apache service shape ... from vm-base spark-master/worker
+#   - JAR centralization (host: /opt/sd411/jars via ${SD411_JARS}, mounted
+#     into the containers at /opt/spark/extra-jars -- that container path is
+#     what --jars needs) from base's spark-master/worker volumes
+#   - workdir fix (spark-work named vol) . from base's working_dir + volume
+#   - MinIO/mc tag pins ................. from common.env via ${MINIO_IMAGE}/${MC_IMAGE}
+#
+# Requires: ../vm-base/docker-compose.base.yml present, and lab03/.env stamped
+# from common.env by vm-base/scripts/sync_env.sh so ${...} resolves.
+# verify_lab03.sh checks both before you start.
+#
+# Normal bring-up:            docker compose up -d
+# Bring-up incl. mc shell:    docker compose --profile tools run --rm mc
+# Tear-down (keep data):      docker compose down
+# Tear-down (wipe volumes):   docker compose down -v
+# =============================================================================
+
+name: lab03
+
+services:
+
+  spark-master:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: spark-master
+    # extends does NOT inherit networks; declare it. volumes are MERGED, so
+    # this ro script mount ADDS to the inherited extra-jars + spark-work.
+    networks: [sd411-net]
+    volumes:
+      - ./scripts:/opt/lab03/scripts:ro
+
+  spark-worker:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: spark-worker
+    depends_on: [spark-master]      # not inherited; declare it
+    networks: [sd411-net]
+
+  minio:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: minio
+    networks: [sd411-net]
+
+  minio-init:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks: [sd411-net]
+    # command REPLACES the base (bucket-only) command, but environment is
+    # MERGED, and the base only sets MINIO_ROOT_USER/PASSWORD/S3_*BUCKET; the
+    # seed vars this lab's command references must be added here explicitly.
+    environment:
+      SEED_CSV: ${SEED_CSV}
+    # command REPLACES the base (bucket-only) command, so re-create the buckets
+    # then seed Lab 3's object from the shared /opt/sd411/data seed. Exits 64
+    # (distinct from a hard failure) if the provisioned seed is absent, which
+    # verify_lab03.sh check [7] reports specifically.
+    command:
+      - |
+        set -e
+        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        mc mb --ignore-existing "local/$${S3_BUCKET}"
+        mc mb --ignore-existing "local/$${S3_LANDING_BUCKET}"
+        if [ ! -f /seed/$${SEED_CSV} ]; then
+          echo "WARN: /seed/$${SEED_CSV} not found; seed skipped" && exit 64
+        fi
+        mc cp /seed/$${SEED_CSV} "local/$${S3_BUCKET}/raw/$${SEED_CSV}"
+        echo "minio-init: Lab 3 seed complete"
+    volumes:
+      - ${SD411_DATA}:/seed:ro
+
+  # ---------------------------------------------------------------------------
+  # Part C helper: pull one Parquet part-file out of MinIO for the metadata
+  # autopsy. Writes into the SHARED spark-work volume (not a host bind mount),
+  # so the pulled file is visible inside spark-master. pyarrow does NOT ship
+  # with apache/spark:3.5.3-python3 -- run `pip3 install pyarrow` in the
+  # spark-master container once first (verify_lab03.sh check 11 flags this).
+  #
+  #   docker compose --profile tools run --rm mc
+  #   # inside the shell:
+  #   mc ls local/sd411/lab03/<alpha>/parquet_snappy/
+  #   # mc does not glob wildcards in `cp`; use the exact filename from `ls`
+  #   mc cp local/sd411/lab03/<alpha>/parquet_snappy/<exact-filename> /work/
+  #   exit
+  #   docker compose exec spark-master python3 \
+  #     /opt/lab03/scripts/inspect_parquet.py part-00000-*.parquet
+  # ---------------------------------------------------------------------------
+  mc:
+    image: ${MC_IMAGE}
+    profiles: ["tools"]
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks: [sd411-net]
+    environment:
+      S3_ENDPOINT: ${S3_ENDPOINT}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - spark-work:/work
+    working_dir: /work
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        mc alias set local "$${S3_ENDPOINT}" "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        exec /bin/sh
+
+networks:
+  sd411-net:
+
+volumes:
+  minio-data:
+  spark-work:
