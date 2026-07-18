@@ -58,8 +58,6 @@ docker compose exec spark-master spark-submit \
   /opt/lab03/scripts/lab03_benchmark.py
 ```
 
-We pass `--jars` from the centralized JAR mount, not `--packages`. The lab network intercepts TLS, so Maven cannot resolve the S3A connector on the fly; those JARs were fetched once on the host (into `/opt/sd411/jars`, per `common.env`'s `${SD411_JARS}`) and mounted into the containers at `/opt/spark/extra-jars` — that container path is what `--jars` needs, since `/opt/sd411/jars` only exists on the host. If you ever see a `ClassNotFoundException` for `s3a`, the JARs are the first thing to check, not your code.
-
 What you should be looking at when the numbers come out: which codec wins on size, which wins on write time, and whether they are the same codec. They will not be. That tension is the entire reason codecs are a knob and not a constant.
 
 ## Part B - Race the queries
