@@ -1,0 +1,97 @@
+# =============================================================================
+# SD411 lab04 — RDDs From First Principles  (was lab3)
+# Session R4 · Thu 10 Sep 2026
+#
+# Converted to the extends: base architecture in the coordinated pass. This
+# single change inherits, all at once:
+#   - F1 image + apache service shape ..... base spark-master / spark-worker
+#   - JAR centralization .................. base mount of ${SD411_JARS}
+#   - workdir permission fix .............. base working_dir + spark-work volume
+#   - MinIO/mc pins, creds, worker sizing . ${...} from the stamped .env
+#
+# NOTHING in this file may hardcode an image tag, credential, bucket name, or
+# worker size. All of those live in vm-base/common.env and arrive here as .env.
+#
+# Requires: ../vm-base/docker-compose.base.yml present, and ./.env stamped by
+# scripts/sync_env.sh. Without the .env every ${...} resolves empty and the
+# stack comes up misconfigured rather than failing loudly — run sync_env.sh.
+#
+# extends: semantics that bit us and must not be "cleaned up":
+#   - networks are NOT inherited .......... re-declared on every service
+#   - depends_on is NOT inherited ......... re-declared where needed
+#   - volumes ARE merged .................. the ro scripts mount ADDS to the
+#                                           inherited extra-jars + spark-work
+#   - command REPLACES entirely ........... minio-init re-creates the buckets
+# =============================================================================
+name: lab04
+
+services:
+
+  spark-master:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: spark-master
+    networks: [sd411-net]
+    volumes:
+      - ./scripts:/opt/lab04/scripts:ro
+    # VERIFY BEFORE TERM: Parts 1-2 of this lab live in the driver UI, so
+    # ${PORT_DRIVER_UI} (4040) and ${PORT_DRIVER_UI_ALT} (4041) MUST be
+    # published. common.env defines both, which implies the base publishes
+    # them. Confirm with `docker compose config`; if they are absent from the
+    # base, uncomment the block below (ports append, so do NOT duplicate a
+    # mapping the base already publishes).
+    # ports:
+    #   - "${PORT_DRIVER_UI}:4040"
+    #   - "${PORT_DRIVER_UI_ALT}:4041"
+
+  spark-worker:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: spark-worker
+    depends_on: [spark-master]      # not inherited; declare it
+    networks: [sd411-net]
+
+  minio:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: minio
+    networks: [sd411-net]
+
+  minio-init:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks: [sd411-net]
+    environment:
+      SEED_CSV: ${SEED_CSV}
+    volumes:
+      - ${SD411_DATA}:/seed:ro
+    # Replaces the base bucket-only command. lab04 introduces no new data: it
+    # reuses the season seed lab03 measured, from the shared provisioned copy.
+    # Exit 64 (distinct from a failure) means the seed was never provisioned.
+    command:
+      - |
+        set -e
+        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        mc mb --ignore-existing "local/$${S3_BUCKET}"
+        mc mb --ignore-existing "local/$${S3_LANDING_BUCKET}"
+        if mc stat "local/$${S3_BUCKET}/raw/$${SEED_CSV}" >/dev/null 2>&1; then
+          echo "OK: season seed already in bucket."
+        elif [ -f "/seed/$${SEED_CSV}" ]; then
+          echo "Seeding raw/$${SEED_CSV} from $${SD411_DATA} ..."
+          mc cp "/seed/$${SEED_CSV}" "local/$${S3_BUCKET}/raw/$${SEED_CSV}"
+        else
+          echo "FATAL: $${SEED_CSV} not in the bucket and not in /opt/sd411/data."
+          echo "The VM provisioner stages this seed. See data/README.md."
+          exit 64
+        fi
+
+networks:
+  sd411-net:
+
+volumes:
+  minio-data:
+  spark-work:
