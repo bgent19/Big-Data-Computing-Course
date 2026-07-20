@@ -1,0 +1,114 @@
+# =============================================================================
+# SD411 lab05 -- Catalyst archaeology: same query, four ways   (R5)
+# =============================================================================
+# Converted to the extends: base architecture per lab_canonical_docker-compose.yml.
+# This single change inherits, from ../vm-base/docker-compose.base.yml:
+#   - F1 image + apache service shape ..... base spark-master / spark-worker
+#   - JAR centralization .................. base's ${SD411_JARS} -> /opt/spark/extra-jars
+#   - workdir permission fix .............. base's working_dir + spark-work named volume
+#   - MinIO/mc pins + credentials ......... ${MINIO_IMAGE} / ${MC_IMAGE} from common.env
+#
+# NO image tag, credential, bucket name, port, or worker size is hardcoded in
+# this file. All of it resolves from .env, which scripts/sync_env.sh stamps
+# into this directory from vm-base/common.env. If ${...} fails to resolve,
+# you have not run sync_env.sh -- that is check C01 in verify_lab05.sh.
+#
+# extends: inheritance rules that bit us before, restated so nobody re-learns:
+#   - networks are NOT inherited ......... re-declared on every service below
+#   - depends_on is NOT inherited ........ re-declared on worker and minio-init
+#   - volumes ARE merged ................. the ro script mount ADDS to the
+#                                          inherited extra-jars + spark-work
+#   - command REPLACES entirely .......... minio-init re-states the full script
+#   - container_name is NOT inherited .... set explicitly below so it matches
+#                                          the fixed names verify_lab05.sh and
+#                                          the instructor triage docs expect;
+#                                          without it Compose v2 default-names
+#                                          containers "lab05-spark-master-1"
+#                                          etc, and every `docker exec
+#                                          lab05-spark-master ...` in this
+#                                          packet 404s despite a healthy stack.
+#
+# Bring-up:              docker compose up -d
+# Tear-down (keep data): docker compose down
+# Tear-down (wipe data): docker compose down -v
+# Stale stack from another lab: ../vm-base/scripts/sd411_down_all.sh
+#
+# UIs: master ${PORT_SPARK_MASTER_UI} · worker 8081 · driver ${PORT_DRIVER_UI}
+#      MinIO console ${PORT_MINIO_CONSOLE}
+# =============================================================================
+
+name: lab05
+
+services:
+
+  spark-master:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: spark-master
+    container_name: lab05-spark-master
+    networks: [sd411-net]
+    volumes:
+      - ./scripts:/opt/lab05/scripts:ro
+    environment:
+      # Passed through so the PySpark scripts read S3A config from the
+      # environment instead of hardcoding it. Values come from common.env.
+      S3_ENDPOINT: ${S3_ENDPOINT}
+      S3_BUCKET: ${S3_BUCKET}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      HADOOP_AWS_VERSION: ${HADOOP_AWS_VERSION}
+      AWS_SDK_BUNDLE_VERSION: ${AWS_SDK_BUNDLE_VERSION}
+      # Where the driver writes plan files. Must match the base's spark-work
+      # mount point. INSTRUCTOR: confirm against vm-base/docker-compose.base.yml
+      # (see pre-term checklist item 1) -- this is the one path this packet
+      # assumes rather than inherits.
+      SPARK_WORK_DIR: /opt/spark/work
+
+  spark-worker:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: spark-worker
+    container_name: lab05-spark-worker
+    depends_on: [spark-master]
+    networks: [sd411-net]
+
+  minio:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: minio
+    container_name: lab05-minio
+    networks: [sd411-net]
+
+  minio-init:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: minio-init
+    container_name: lab05-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks: [sd411-net]
+    # command REPLACES the base bucket-only command. Re-create the buckets,
+    # then seed this lab's object from the shared provisioned seed. The copy
+    # is conditional so a warm MinIO volume from lab03/lab04 is not re-seeded.
+    command:
+      - |
+        set -e
+        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        mc mb --ignore-existing "local/$${S3_BUCKET}"
+        mc mb --ignore-existing "local/$${S3_LANDING_BUCKET}"
+        if mc stat "local/$${S3_BUCKET}/raw/statcast_2025.csv" >/dev/null 2>&1; then
+          echo "seed already present, skipping copy"
+        else
+          mc cp /seed/statcast_2025.csv "local/$${S3_BUCKET}/raw/statcast_2025.csv"
+        fi
+        echo "minio-init complete"
+    volumes:
+      - ${SD411_DATA}:/seed:ro
+
+networks:
+  sd411-net:
+
+volumes:
+  minio-data:
+  spark-work:
