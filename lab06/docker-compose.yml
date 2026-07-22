@@ -1,0 +1,88 @@
+# =============================================================================
+# SD411 Lab 6 — Partitioning Experiments
+# Module 2 · Week 6 · R6 · Thu 24 Sep 2026
+#
+# v2.0 — reconciled against sd411_lab_reconciliation_tracker.html.
+#   rename   lab5 -> lab06 (dir, name:, script mount, verify filename, prose)
+#   jars     centralized: /opt/sd411/jars inherited from the base. This lab no
+#            longer ships download_jars.sh or a ./jars mount.
+#   mcpin    no hardcoded tags anywhere; MinIO/mc come from common.env (F2)
+#   workdir  spark-work named volume + read-only ./scripts, from the base
+#   f1       apache/spark shape, inherited from the base
+#
+# extends: semantics that bite (all three handled below)
+#   - networks     NOT inherited -> re-declared on every service
+#   - depends_on   NOT inherited -> re-declared on worker and minio-init
+#   - volumes      MERGED        -> the ro script mount ADDS to the inherited
+#                                   extra-jars + spark-work
+#   - command      REPLACES      -> minio-init re-creates the buckets itself
+#
+# Requires: ../vm-base/docker-compose.base.yml, and a stamped .env from
+#           scripts/sync_env.sh so ${...} resolves out of common.env.
+# =============================================================================
+name: lab06
+
+services:
+
+  spark-master:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: spark-master
+    networks: [sd411-net]
+    volumes:
+      - ./scripts:/opt/lab06/scripts:ro
+    ports:
+      - "${PORT_SPARK_MASTER_UI}:8080"
+      - "${PORT_SPARK_MASTER}:7077"
+      - "${PORT_DRIVER_UI}:4040"
+      - "${PORT_DRIVER_UI_ALT}:4041"
+
+  spark-worker:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: spark-worker
+    depends_on: [spark-master]
+    networks: [sd411-net]
+
+  minio:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: minio
+    networks: [sd411-net]
+    ports:
+      - "${PORT_MINIO_API}:9000"
+      - "${PORT_MINIO_CONSOLE}:9001"
+
+  minio-init:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks: [sd411-net]
+    volumes:
+      - ${SD411_DATA}:/seed:ro
+    environment:
+      SEED_CSV: ${SEED_CSV}
+    # Replaces the base bucket-only command. Exit 64 == "the shared seed is
+    # missing", which is a provisioning problem, not a broken stack.
+    command:
+      - |
+        set -e
+        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        mc mb --ignore-existing "local/$${S3_BUCKET}"
+        mc mb --ignore-existing "local/$${S3_LANDING_BUCKET}"
+        if [ ! -f "/seed/$${SEED_CSV}" ]; then
+          echo "SEED MISSING: $${SD411_DATA}/$${SEED_CSV} — see data/README.md"
+          exit 64
+        fi
+        mc cp "/seed/$${SEED_CSV}" "local/$${S3_BUCKET}/raw/$${SEED_CSV}"
+        echo "SEED COMPLETE: raw/$${SEED_CSV} in bucket $${S3_BUCKET}"
+
+networks:
+  sd411-net:
+
+volumes:
+  minio-data:
+  spark-work:
