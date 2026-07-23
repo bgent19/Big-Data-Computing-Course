@@ -1,0 +1,129 @@
+# =============================================================================
+# SD411 lab07 — Join Strategy Lab (R7, Thu 1 Oct 2026)
+#
+# Reconciled per sd411_lab_reconciliation_tracker.html:
+#   step 1 rename ...... lab6 -> lab07 (dir, name:, /opt/lab07/scripts)
+#   step 3 extends: .... image parity + ${SD411_JARS} centralization +
+#                        workdir fix + common.env pins, all inherited at once
+#
+# Requires: ../vm-base/docker-compose.base.yml present, and a stamped .env
+# (scripts/sync_env.sh) so ${...} resolves from common.env.
+#
+# extends: merge rules (see CHANGELOG "Durable technical decisions"):
+#   MERGED   volumes, environment, ports, image, healthcheck, working_dir
+#   NOT INHERITED  networks, depends_on  -> re-declared on every service below
+#   REPLACED command  -> minio-init restates the buckets before its own checks
+#
+# This file hardcodes no image tag, credential, bucket name, port, or worker
+# size. If you find one, lift it into common.env.
+# =============================================================================
+name: lab07
+
+services:
+
+  spark-master:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: spark-master
+    networks: [sd411-net]
+    # volumes MERGE, so this read-only script mount ADDS to the inherited
+    # extra-jars + spark-work mounts. No host work/ bind mount anywhere.
+    volumes:
+      - ./scripts:/opt/lab07/scripts:ro
+    # ---------------------------------------------------------------------
+    # DRIVER UI PORTS — highest-risk assumption in this conversion.
+    # Parts 1-4 are unteachable without the driver UI: every part is verified
+    # in the SQL tab, and Part 4's whole lesson is reading the EXECUTED plan
+    # there. The canonical lab compose does not re-declare ports, and
+    # common.env defines PORT_DRIVER_UI / PORT_DRIVER_UI_ALT, so the base is
+    # assumed to publish them. Confirm with `docker compose config` on the
+    # golden VM; if the base does NOT publish them, uncomment this block.
+    # ports:
+    #   - "${PORT_DRIVER_UI}:4040"
+    #   - "${PORT_DRIVER_UI_ALT}:4041"
+    #   - "${PORT_SPARK_MASTER_UI}:8080"
+    # ---------------------------------------------------------------------
+
+  spark-worker:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: spark-worker
+    depends_on: [spark-master]      # not inherited; declare it
+    networks: [sd411-net]
+    # Worker sizing (WORKER_MEM / WORKER_CORES) is inherited from the base.
+    # It is a single course-wide knob in common.env, NOT a per-lab setting.
+
+  minio:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: minio
+    networks: [sd411-net]
+
+  minio-init:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks: [sd411-net]
+    environment:
+      # extends: MERGES environment, so we add only what the base omits.
+      # The base puts MINIO_ROOT_*, S3_BUCKET and S3_LANDING_BUCKET in the
+      # container env; FACT_PREFIX is lab07-specific.
+      FACT_PREFIX: ${FACT_PREFIX:?FACT_PREFIX not set — .env is unstamped; re-run sync_env.sh}
+    # command REPLACES the base bucket-only command, so re-create the buckets
+    # first, then run this lab's dependency check.
+    #
+    # lab07 seeds NO raw data of its own. It CONSUMES the fact table lab06
+    # (Partitioning) writes. Exit 64 is the distinct "upstream lab never ran"
+    # signal, kept deliberately apart from a generic failure so
+    # verify_lab07.sh can tell "re-run lab06" from "the stack is broken".
+    command:
+      - |
+        set -e
+        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        mc mb --ignore-existing "local/$${S3_BUCKET}"
+        mc mb --ignore-existing "local/$${S3_LANDING_BUCKET}"
+        # `mc ls` on a valid-but-empty prefix still exits 0 with no output, so
+        # a bare exit-code check always reports "present" even on a fresh
+        # bucket. Check that it actually printed a listing.
+        if [ -n "$(mc ls "local/$${S3_BUCKET}/$${FACT_PREFIX}/" 2>/dev/null)" ]; then
+          echo "[minio-init] lab06 fact present at s3a://$${S3_BUCKET}/$${FACT_PREFIX}/"
+          exit 0
+        fi
+        echo "[minio-init] ERROR: s3a://$${S3_BUCKET}/$${FACT_PREFIX}/ is absent."
+        echo "[minio-init] lab07 consumes the fact table lab06 writes."
+        echo "[minio-init] Re-run the lab06 writer, then bring this stack up again."
+        exit 64
+
+  # Interactive mc shell for pulling part-files during analysis. Lab-specific
+  # (the base's minio-init is one-shot), so it is declared here using the
+  # common.env pin. If a future vm-base revision adds a shared tools service,
+  # delete this one.
+  mc-shell:
+    image: ${MC_IMAGE}
+    profiles: ["tools"]
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      # mc is the image ENTRYPOINT; shell-wrapping false-passes. MC_HOST_local
+      # pre-registers the alias so no `mc alias set` step is needed.
+      MC_HOST_local: "http://${MINIO_ROOT_USER}:${MINIO_ROOT_PASSWORD}@minio:9000"
+    entrypoint: ["/bin/sh"]
+    stdin_open: true
+    tty: true
+    networks: [sd411-net]
+
+networks:
+  sd411-net:
+
+volumes:
+  # Same physical volume as lab06 (see the comment in lab06/docker-compose.yml).
+  # Without an explicit shared name, this lab's project prefix ("lab07")
+  # would give it its own private minio-data volume and the fact table
+  # lab06 wrote would never actually be visible here.
+  minio-data:
+    name: sd411-shared-minio-data
+  spark-work:

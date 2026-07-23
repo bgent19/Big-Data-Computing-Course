@@ -84,5 +84,12 @@ networks:
   sd411-net:
 
 volumes:
+  # Named explicitly (not left to the default project-prefixed name) so this
+  # is the SAME physical volume lab07 mounts. Compose project names differ
+  # per lab (`name: lab06` / `name: lab07`), so two labs declaring a bare
+  # `minio-data:` would each get their own private volume and the cross-lab
+  # fact-table handoff would silently see an empty bucket. spark-work stays
+  # project-scoped scratch; it does not need to be shared.
   minio-data:
+    name: sd411-shared-minio-data
   spark-work:
