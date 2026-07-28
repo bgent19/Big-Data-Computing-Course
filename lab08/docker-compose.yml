@@ -1,0 +1,108 @@
+# =============================================================================
+# SD411 Lab 08 - Skew and UI Forensics
+# Session R8, Thu 8 Oct 2026. Module 2, Week 8.
+#
+# Built directly at post-reconciliation parity. Every shared service inherits
+# from ../vm-base/docker-compose.base.yml, so this file hardcodes NO image tag,
+# credential, bucket name, port, or worker size. Change common.env, re-run
+# scripts/sync_env.sh, and this lab moves with the rest of the set.
+#
+# extends: semantics that matter here (see CHANGELOG "durable decisions"):
+#   - volumes MERGE, so the read-only ./scripts mount ADDS to the inherited
+#     ${SD411_JARS} mount and the spark-work named volume.
+#   - environment MERGES, so FACT_PREFIX and LAB08_RESULTS add to the base env.
+#   - networks and depends_on do NOT inherit and are re-declared on every
+#     service below.
+#   - command REPLACES entirely, so minio-init re-creates both buckets before
+#     running its own dependency check.
+#
+# Upstream dependency: lab06 is the WRITER of the pitch fact this lab reads.
+# lab08 does NOT depend on lab07 having been run.
+# =============================================================================
+name: lab08
+
+services:
+
+  spark-master:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: spark-master
+    networks: [sd411-net]
+    volumes:
+      - ./scripts:/opt/lab08/scripts:ro
+    environment:
+      # Canonical cross-lab fact path. FACT_PREFIX belongs in common.env
+      # (see lab07/COMMON_ENV_ADDENDUM.md); the fallback keeps the stack up
+      # until that addendum lands.
+      FACT_PREFIX: ${FACT_PREFIX:-fact/pitches}
+      # Scratch on the spark-work named volume. Never a host bind mount:
+      # Spark runs as root and would leave a root-owned dir on the host.
+      LAB08_RESULTS: /opt/spark/work-dir/results
+    # ---------------------------------------------------------------------
+    # DRIVER UI PORTS. Every graded part of this lab is verified in the
+    # driver UI, so if `docker compose config` on the golden VM shows the base
+    # does NOT publish 4040/4041, uncomment this block. See CHANGELOG.
+    # ports:
+    #   - "${PORT_DRIVER_UI}:4040"
+    #   - "${PORT_DRIVER_UI_ALT}:4041"
+    # ---------------------------------------------------------------------
+
+  spark-worker:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: spark-worker
+    depends_on: [spark-master]
+    networks: [sd411-net]
+
+  minio:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: minio
+    networks: [sd411-net]
+
+  minio-init:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks: [sd411-net]
+    environment:
+      FACT_PREFIX: ${FACT_PREFIX:-fact/pitches}
+    command:
+      - |
+        set -e
+        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        mc mb --ignore-existing "local/$${S3_BUCKET}"
+        mc mb --ignore-existing "local/$${S3_LANDING_BUCKET}"
+        if [ -z "$$(mc ls --recursive "local/$${S3_BUCKET}/$${FACT_PREFIX}/" 2>/dev/null | head -n 1)" ]; then
+          echo "FATAL: no pitch fact at s3a://$${S3_BUCKET}/$${FACT_PREFIX}"
+          echo "Lab 08 reads the fact table Lab 06 wrote. Bring up lab06 and"
+          echo "run its writer, then bring lab08 up again."
+          exit 64
+        fi
+        echo "OK: pitch fact found at s3a://$${S3_BUCKET}/$${FACT_PREFIX}"
+
+  # Ad-hoc MinIO shell for triage. Not started by default.
+  #   docker compose --profile tools run --rm mc-shell
+  mc-shell:
+    image: ${MC_IMAGE}
+    profiles: [tools]
+    entrypoint: ["/bin/sh"]
+    stdin_open: true
+    tty: true
+    networks: [sd411-net]
+    environment:
+      MC_HOST_local: http://${MINIO_ROOT_USER}:${MINIO_ROOT_PASSWORD}@minio:9000
+
+networks:
+  sd411-net:
+
+volumes:
+  # Cross-lab data contract: lab08 READS the pitch fact lab06 wrote into MinIO.
+  # This MUST pin the same explicit name lab06/lab07 use, or Compose prefixes it
+  # per-project (lab08_minio-data) and the fact is invisible. See vm-base base.
+  minio-data:
+    name: sd411-shared-minio-data
+  spark-work:
