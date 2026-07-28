@@ -31,6 +31,13 @@ services:
     networks: [sd411-net]
     volumes:
       - ./scripts:/opt/lab06/scripts:ro
+    # extends: MERGES environment, so this ADDS to the base's PATH/SPARK_* vars.
+    # The Part 0 writer reads these: it loads raw/${SEED_CSV_LARGE} and enforces
+    # the multi-season row floor. lab06 is the WRITER of the shared fact, so
+    # switching it to the large seed is what makes labs 7 and 8 see the big fact.
+    environment:
+      SEED_CSV: ${SEED_CSV_LARGE}
+      SEED_MIN_ROWS: ${SEED_MIN_ROWS_LARGE}
     ports:
       - "${PORT_SPARK_MASTER_UI}:8080"
       - "${PORT_SPARK_MASTER}:7077"
@@ -64,7 +71,8 @@ services:
     volumes:
       - ${SD411_DATA}:/seed:ro
     environment:
-      SEED_CSV: ${SEED_CSV}
+      # Multi-season seed (labs 6/7/8). Earlier labs keep ${SEED_CSV}.
+      SEED_CSV: ${SEED_CSV_LARGE}
     # Replaces the base bucket-only command. Exit 64 == "the shared seed is
     # missing", which is a provisioning problem, not a broken stack.
     command:

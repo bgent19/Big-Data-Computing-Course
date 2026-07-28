@@ -120,6 +120,15 @@ def main():
     # back down without re-verifying s3a://<bucket>/fact/pa_events exceeds
     # 10 MB unfiltered (`mc du`) and that Part 4's home_run-filtered subset
     # still lands well under it.
+    #
+    # MULTI-SEASON CAVEAT (${SEED_CSV_LARGE}): row counts here are ~10x the
+    # single-season numbers above. The unfiltered table clears 10 MB with even
+    # more margin (fine), but the home_run-filtered subset also grows ~10x and
+    # may now CROSS 10 MB -- which would let the static planner broadcast it and
+    # collapse Part 4's runtime-conversion lesson. Before term, `mc du` the
+    # home_run subset on the multi-season fact; if it exceeds ~8 MB, tighten this
+    # projection or the Part 4 filter so the filtered subset stays under 10 MB
+    # while the unfiltered table stays over it. See lab07 INSTRUCTOR_KEY.
     keep = [c for c in
             ["game_pk", "at_bat_number", "events", "des", "description",
              "batter", "pitcher", "stand", "p_throws", "home_team", "away_team",

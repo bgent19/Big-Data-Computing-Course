@@ -122,10 +122,11 @@ def workload(df) -> None:
 # ===========================================================================
 # PART 0 — Build the fact table                          (in lab, ~15 min)
 # ===========================================================================
-# The stack seeds ONE object: the 2025 regular season as CSV. Everything else
-# in this lab, and the join lab next week, reads the Parquet fact you write
-# here. This is the first time in the course you are the producer rather than
-# the consumer, and the path you write is a contract with Lab 7.
+# The stack seeds ONE object: the multi-season Statcast CSV (2015-2025) named by
+# ${SEED_CSV_LARGE}, copied to raw/ by minio-init. Everything else in this lab,
+# and the join lab (7) and skew lab (8), reads the Parquet fact you write here.
+# This is the first time in the course you are the producer rather than the
+# consumer, and the path you write is a contract with Labs 7 and 8.
 #
 # Run this once. If you re-run it, everything downstream changes underneath
 # your measurements, so finish A, B, and C before touching it again.

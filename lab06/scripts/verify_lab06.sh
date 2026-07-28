@@ -17,7 +17,10 @@ report () {
 
 # Load the stamped .env so this script sees the same values compose does.
 if [ -f .env ]; then set -a; . ./.env; set +a; fi
-: "${S3_BUCKET:=sd411}"; : "${SEED_CSV:=statcast_2025.csv}"
+: "${S3_BUCKET:=sd411}"
+# lab06 is the WRITER of the multi-season fact, so it seeds and validates the
+# LARGE seed. Earlier labs (2/3/5) keep ${SEED_CSV}.
+SEED_CSV="${SEED_CSV_LARGE:-${SEED_CSV:-statcast_2025.csv}}"
 : "${SD411_JARS:=/opt/sd411/jars}"; : "${SD411_DATA:=/opt/sd411/data}"
 : "${PORT_SPARK_MASTER_UI:=8080}"; : "${WORKER_CORES:=2}"
 : "${HADOOP_AWS_VERSION:=3.3.4}"; : "${AWS_SDK_BUNDLE_VERSION:=1.12.262}"
@@ -117,7 +120,7 @@ else
 fi
 
 # 10. seed object present and above the common.env size floor
-: "${SEED_MIN_MB:=100}"
+SEED_MIN_MB="${SEED_MIN_MB_LARGE:-${SEED_MIN_MB:-100}}"
 BYTES=$(docker compose run --rm --entrypoint mc \
   -e MC_HOST_local="http://${MINIO_ROOT_USER}:${MINIO_ROOT_PASSWORD}@minio:9000" \
   minio-init stat --json "local/${S3_BUCKET}/raw/${SEED_CSV}" 2>/dev/null \
@@ -131,12 +134,13 @@ else
   report FAIL "10 seed-size" "$((BYTES/1024/1024)) MB is under the ${SEED_MIN_MB} MB floor — re-seed"
 fi
 
-# 11. disk headroom: Part B writes three layout copies of the fact table
+# 11. disk headroom: the multi-season raw CSV (~5 GB) lands in MinIO, and Part B
+# writes three layout copies of the (now ~10x larger) fact table on top of it.
 AVAIL_GB=$(df -BG --output=avail . 2>/dev/null | tail -1 | tr -dc '0-9')
-if [ "${AVAIL_GB:-0}" -ge 6 ]; then
+if [ "${AVAIL_GB:-0}" -ge 15 ]; then
   report PASS "11 disk-headroom" "${AVAIL_GB} GB free"
 else
-  report FAIL "11 disk-headroom" "${AVAIL_GB:-?} GB free — Part B needs room for 3 layouts"
+  report FAIL "11 disk-headroom" "${AVAIL_GB:-?} GB free — multi-season CSV + 3 Part B layouts need ~15 GB"
 fi
 
 # 12. master UI reachable from the host (Parts A and C require UI evidence)
