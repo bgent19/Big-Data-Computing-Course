@@ -1,0 +1,118 @@
+# =============================================================================
+# SD411 Lab 09 - Kafka, End to End           (Module 3, R10, Thu 22 Oct 2026)
+#
+# Built at post-reconciliation parity. No image tag, credential, port, or
+# sizing value is hardcoded here; everything resolves from the stamped .env
+# (scripts/sync_env.sh copies common.env into lab09/.env).
+#
+# Shape of this stack, and why it differs from lab02-lab08:
+#   - kafka is the ONLY service that comes up by default. This lab computes
+#     nothing, so Spark and MinIO are dead weight on an 8 GB VM (open item F3).
+#   - spark-master / spark-worker sit behind the `spark` profile and inherit
+#     from ../vm-base/docker-compose.base.yml. They are needed only for the
+#     Part 6 stretch (Spark batch read of a Kafka topic).
+#   - There is no minio / minio-init service. This lab touches no object
+#     storage and no lab06 fact table, so it has no upstream lab dependency.
+#     Its only dependency is the replay file staged by scripts/make_stream.py.
+#
+# extends: semantics that bit us in earlier labs and still apply here:
+#   volumes / environment / ports / image / healthcheck / working_dir MERGE.
+#   networks and depends_on do NOT inherit and are re-declared per service.
+#   command REPLACES entirely.
+# =============================================================================
+name: lab09
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Single-broker Kafka in KRaft mode (no ZooKeeper). The official apache/kafka
+  # image formats its own storage directory on first boot from CLUSTER_ID.
+  #
+  # user "0:0" for the same reason every Spark service in this course uses it:
+  # the image runs as UID 1000, the named volume is created root-owned, and the
+  # broker cannot create its log dir. Acceptable for a course VM, never for
+  # production.
+  # ---------------------------------------------------------------------------
+  kafka:
+    image: ${KAFKA_IMAGE}
+    user: "0:0"
+    environment:
+      CLUSTER_ID: ${KAFKA_CLUSTER_ID}
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      # The CONTROLLER listener binds on the service name, not 0.0.0.0. Kafka
+      # 3.9 derives the advertised controller address from `listeners` (it is
+      # deliberately absent from advertised.listeners) and refuses to start if
+      # that address is the nonroutable meta-address:
+      #   IllegalArgumentException: advertised.listeners cannot use the
+      #   nonroutable meta-address 0.0.0.0
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://kafka:9093,EXTERNAL://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:${PORT_KAFKA_EXTERNAL}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      # Single broker, so every replication factor must be 1 or the internal
+      # topics never become available and the broker hangs at startup.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_OFFSETS_TOPIC_NUM_PARTITIONS: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      # Rebalances are a Part 4 measurement, so do not sit in the default
+      # 3-second join delay while a 120-minute period burns.
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # Topics must be created deliberately. Auto-creation would silently
+      # produce a 1-partition topic on a typo and wreck Part 3's numbers.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_NUM_PARTITIONS: 1
+      # Broker default retention stays long; Part 5 overrides retention.ms on
+      # ONE topic. The check interval is the knob that makes the deletion
+      # observable inside a lab period (broker default is 5 minutes).
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: ${KAFKA_RETENTION_CHECK_MS}
+      KAFKA_HEAP_OPTS: ${KAFKA_HEAP_OPTS}
+    ports:
+      - "${PORT_KAFKA_EXTERNAL}:29092"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+      - ./scripts:/opt/lab09/scripts:ro
+      - ${SD411_DATA}:/seed:ro
+    networks: [sd411-net]
+    # This image is Alpine-based. Its shell is sh, not bash, and it ships no
+    # curl. The bash /dev/tcp healthcheck used by the Spark services does NOT
+    # work here. Ask the broker a real question instead.
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 20s
+      retries: 12
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
+  # Stretch only. `docker compose --profile spark up -d` brings these up.
+  # ---------------------------------------------------------------------------
+  spark-master:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: spark-master
+    profiles: [spark]
+    networks: [sd411-net]
+    volumes:
+      - ./scripts:/opt/lab09/scripts:ro
+
+  spark-worker:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: spark-worker
+    profiles: [spark]
+    depends_on: [spark-master]
+    networks: [sd411-net]
+
+networks:
+  sd411-net:
+
+volumes:
+  kafka-data:
+  spark-work:

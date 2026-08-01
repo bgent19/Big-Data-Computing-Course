@@ -1,0 +1,274 @@
+[
+  {
+    "actor": {
+      "avatar_url": "https://avatars.githubusercontent.com/u/123376072?",
+      "display_login": "Antonhejhejhej",
+      "gravatar_id": "",
+      "id": 123376072,
+      "login": "Antonhejhejhej",
+      "url": "https://api.github.com/users/Antonhejhejhej"
+    },
+    "created_at": "2026-03-04T15:00:00Z",
+    "id": "7078165781",
+    "payload": {
+      "action": "opened",
+      "issue": {
+        "active_lock_reason": null,
+        "assignee": null,
+        "assignees": [],
+        "body": "F\u00f6rs\u00f6kte forka men det blir ingen CD",
+        "closed_at": null,
+        "comments": 0,
+        "comments_url": "https://api.github.com/repos/bombsimon/det-blev-ingen-cd.com/issues/18/comments",
+        "created_at": "2026-03-04T14:59:59Z",
+        "events_url": "https://api.github.com/repos/bombsimon/det-blev-ingen-cd.com/issues/18/events",
+        "html_url": "https://github.com/bombsimon/det-blev-ingen-cd.com/issues/18",
+        "id": 4022455877,
+        "issue_dependencies_summary": {
+          "blocked_by": 0,
+          "blocking": 0,
+          "total_blocked_by": 0,
+          "total_blocking": 0
+        },
+        "labels": [],
+        "labels_url": "https://api.github.com/repos/bombsimon/det-blev-ingen-cd.com/issues/18/labels{/name}",
+        "locked": false,
+        "milestone": null,
+        "node_id": "I_kwDOBz7wic7vwc5F",
+        "number": 18,
+        "performed_via_github_app": null,
+        "pinned_comment": null,
+        "reactions": {
+          "+1": 0,
+          "-1": 0,
+          "confused": 0,
+          "eyes": 0,
+          "heart": 0,
+          "hooray": 0,
+          "laugh": 0,
+          "rocket": 0,
+          "total_count": 0,
+          "url": "https://api.github.com/repos/bombsimon/det-blev-ingen-cd.com/issues/18/reactions"
+        },
+        "repository_url": "https://api.github.com/repos/bombsimon/det-blev-ingen-cd.com",
+        "state": "open",
+        "state_reason": null,
+        "sub_issues_summary": {
+          "completed": 0,
+          "percent_completed": 0,
+          "total": 0
+        },
+        "timeline_url": "https://api.github.com/repos/bombsimon/det-blev-ingen-cd.com/issues/18/timeline",
+        "title": "Det blev ingen CD",
+        "updated_at": "2026-03-04T14:59:59Z",
+        "url": "https://api.github.com/repos/bombsimon/det-blev-ingen-cd.com/issues/18",
+        "user": {
+          "avatar_url": "https://avatars.githubusercontent.com/u/123376072?v=4",
+          "events_url": "https://api.github.com/users/Antonhejhejhej/events{/privacy}",
+          "followers_url": "https://api.github.com/users/Antonhejhejhej/followers",
+          "following_url": "https://api.github.com/users/Antonhejhejhej/following{/other_user}",
+          "gists_url": "https://api.github.com/users/Antonhejhejhej/gists{/gist_id}",
+          "gravatar_id": "",
+          "html_url": "https://github.com/Antonhejhejhej",
+          "id": 123376072,
+          "login": "Antonhejhejhej",
+          "node_id": "U_kgDOB1qRyA",
+          "organizations_url": "https://api.github.com/users/Antonhejhejhej/orgs",
+          "received_events_url": "https://api.github.com/users/Antonhejhejhej/received_events",
+          "repos_url": "https://api.github.com/users/Antonhejhejhej/repos",
+          "site_admin": false,
+          "starred_url": "https://api.github.com/users/Antonhejhejhej/starred{/owner}{/repo}",
+          "subscriptions_url": "https://api.github.com/users/Antonhejhejhej/subscriptions",
+          "type": "User",
+          "url": "https://api.github.com/users/Antonhejhejhej",
+          "user_view_type": "public"
+        }
+      }
+    },
+    "public": true,
+    "repo": {
+      "id": 121565321,
+      "name": "bombsimon/det-blev-ingen-cd.com",
+      "url": "https://api.github.com/repos/bombsimon/det-blev-ingen-cd.com"
+    },
+    "type": "IssuesEvent"
+  },
+  {
+    "actor": {
+      "avatar_url": "https://avatars.githubusercontent.com/u/50662717?",
+      "display_login": "ProgrammiererEFZ",
+      "gravatar_id": "",
+      "id": 50662717,
+      "login": "ProgrammiererEFZ",
+      "url": "https://api.github.com/users/ProgrammiererEFZ"
+    },
+    "created_at": "2026-03-04T15:00:00Z",
+    "id": "7078165792",
+    "org": {
+      "avatar_url": "https://avatars.githubusercontent.com/u/86405535?",
+      "gravatar_id": "",
+      "id": 86405535,
+      "login": "bunkerity",
+      "url": "https://api.github.com/orgs/bunkerity"
+    },
+    "payload": {
+      "action": "labeled",
+      "issue": {
+        "active_lock_reason": null,
+        "assignee": null,
+        "assignees": [],
+        "body": "### What happened?\n\nI have a similar issue to this issue: #2868, but I'm on the newest version 1.6.8.\n\nWhenever I open the \"Reports\" page, it takes around 30 seconds to load and RAM spikes from 7GB to 12GB.\n\n<img width=\"3319\" height=\"759\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/c079ca82-103f-4eba-ac0f-4ad49f6d7e8b\" />\n\nI have about 4000 reports.\n\nI'm running BunkerWeb in Docker on a Debian 12 server with 64GB of RAM and a Intel Xeon E-2334. Networking is 10Gig.\n\n### How to reproduce?\n\nLoad the report page.\n\n### Configuration file(s) (yaml or .env)\n\n```YAML\n\n```\n\n### Relevant log output\n\n```shell\n\n```\n\n### BunkerWeb version\n\n1.6.8\n\n### What integration are you using?\n\nDocker\n\n### Linux distribution (if applicable)\n\nDebian 12\n\n### Removed private data\n\n- [x] I have removed all private data from the configuration file and the logs\n\n### Code of Conduct\n\n- [x] I agree to follow this project's Code of Conduct",
+        "closed_at": "2026-03-04T15:00:31Z",
+        "comments": 0,
+        "comments_url": "https://api.github.com/repos/bunkerity/bunkerweb/issues/3260/comments",
+        "created_at": "2026-03-04T14:59:58Z",
+        "events_url": "https://api.github.com/repos/bunkerity/bunkerweb/issues/3260/events",
+        "html_url": "https://github.com/bunkerity/bunkerweb/issues/3260",
+        "id": 4022455794,
+        "issue_dependencies_summary": {
+          "blocked_by": 0,
+          "blocking": 0,
+          "total_blocked_by": 0,
+          "total_blocking": 0
+        },
+        "labels": [
+          {
+            "color": "d73a4a",
+            "default": true,
+            "description": "Something isn't working",
+            "id": 1510562535,
+            "name": "bug",
+            "node_id": "MDU6TGFiZWwxNTEwNTYyNTM1",
+            "url": "https://api.github.com/repos/bunkerity/bunkerweb/labels/bug"
+          }
+        ],
+        "labels_url": "https://api.github.com/repos/bunkerity/bunkerweb/issues/3260/labels{/name}",
+        "locked": false,
+        "milestone": null,
+        "node_id": "I_kwDODCB-lM7vwc3y",
+        "number": 3260,
+        "performed_via_github_app": null,
+        "pinned_comment": null,
+        "reactions": {
+          "+1": 0,
+          "-1": 0,
+          "confused": 0,
+          "eyes": 0,
+          "heart": 0,
+          "hooray": 0,
+          "laugh": 0,
+          "rocket": 0,
+          "total_count": 0,
+          "url": "https://api.github.com/repos/bunkerity/bunkerweb/issues/3260/reactions"
+        },
+        "repository_url": "https://api.github.com/repos/bunkerity/bunkerweb",
+        "state": "closed",
+        "state_reason": "duplicate",
+        "sub_issues_summary": {
+          "completed": 0,
+          "percent_completed": 0,
+          "total": 0
+        },
+        "timeline_url": "https://api.github.com/repos/bunkerity/bunkerweb/issues/3260/timeline",
+        "title": "[BUG] Slow reports page and RAM spike",
+        "type": null,
+        "updated_at": "2026-03-04T15:00:31Z",
+        "url": "https://api.github.com/repos/bunkerity/bunkerweb/issues/3260",
+        "user": {
+          "avatar_url": "https://avatars.githubusercontent.com/u/50662717?v=4",
+          "events_url": "https://api.github.com/users/ProgrammiererEFZ/events{/privacy}",
+          "followers_url": "https://api.github.com/users/ProgrammiererEFZ/followers",
+          "following_url": "https://api.github.com/users/ProgrammiererEFZ/following{/other_user}",
+          "gists_url": "https://api.github.com/users/ProgrammiererEFZ/gists{/gist_id}",
+          "gravatar_id": "",
+          "html_url": "https://github.com/ProgrammiererEFZ",
+          "id": 50662717,
+          "login": "ProgrammiererEFZ",
+          "node_id": "MDQ6VXNlcjUwNjYyNzE3",
+          "organizations_url": "https://api.github.com/users/ProgrammiererEFZ/orgs",
+          "received_events_url": "https://api.github.com/users/ProgrammiererEFZ/received_events",
+          "repos_url": "https://api.github.com/users/ProgrammiererEFZ/repos",
+          "site_admin": false,
+          "starred_url": "https://api.github.com/users/ProgrammiererEFZ/starred{/owner}{/repo}",
+          "subscriptions_url": "https://api.github.com/users/ProgrammiererEFZ/subscriptions",
+          "type": "User",
+          "url": "https://api.github.com/users/ProgrammiererEFZ",
+          "user_view_type": "public"
+        }
+      },
+      "label": {
+        "color": "d73a4a",
+        "default": true,
+        "description": "Something isn't working",
+        "id": 1510562535,
+        "name": "bug",
+        "node_id": "MDU6TGFiZWwxNTEwNTYyNTM1",
+        "url": "https://api.github.com/repos/bunkerity/bunkerweb/labels/bug"
+      },
+      "labels": [
+        {
+          "color": "d73a4a",
+          "default": true,
+          "description": "Something isn't working",
+          "id": 1510562535,
+          "name": "bug",
+          "node_id": "MDU6TGFiZWwxNTEwNTYyNTM1",
+          "url": "https://api.github.com/repos/bunkerity/bunkerweb/labels/bug"
+        }
+      ]
+    },
+    "public": true,
+    "repo": {
+      "id": 203456148,
+      "name": "bunkerity/bunkerweb",
+      "url": "https://api.github.com/repos/bunkerity/bunkerweb"
+    },
+    "type": "IssuesEvent"
+  },
+  {
+    "actor": {
+      "avatar_url": "https://avatars.githubusercontent.com/u/59168096?",
+      "display_login": "Adrien-hue",
+      "gravatar_id": "",
+      "id": 59168096,
+      "login": "Adrien-hue",
+      "url": "https://api.github.com/users/Adrien-hue"
+    },
+    "created_at": "2026-03-04T15:00:00Z",
+    "id": "7078165812",
+    "payload": {
+      "action": "opened",
+      "number": 35,
+      "pull_request": {
+        "base": {
+          "ref": "codex-backend",
+          "repo": {
+            "id": 1081073209,
+            "name": "palaj",
+            "url": "https://api.github.com/repos/Adrien-hue/palaj"
+          },
+          "sha": "ceaf0b9a711ed01a480e55ce99226058f479127c"
+        },
+        "head": {
+          "ref": "codex/add-grouped-result_stats-under-stats",
+          "repo": {
+            "id": 1081073209,
+            "name": "palaj",
+            "url": "https://api.github.com/repos/Adrien-hue/palaj"
+          },
+          "sha": "32923c96c7d52eacf25850dfc6f169ef9c6e26ba"
+        },
+        "id": 3353795476,
+        "number": 35,
+        "url": "https://api.github.com/repos/Adrien-hue/palaj/pulls/35"
+      }
+    },
+    "public": true,
+    "repo": {
+      "id": 1081073209,
+      "name": "Adrien-hue/palaj",
+      "url": "https://api.github.com/repos/Adrien-hue/palaj"
+    },
+    "type": "PullRequestEvent"
+  }
+]
