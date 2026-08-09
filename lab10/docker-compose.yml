@@ -1,0 +1,118 @@
+# =============================================================================
+# SD411 Lab 10 - Windowing on Wikipedia Pageviews
+# Module 3, Week 11, R11 (Thu 29 Oct 2026)
+#
+# Built at post-reconciliation parity: inherits every shared service from
+# ../vm-base/docker-compose.base.yml per lab_canonical_docker-compose.yml.
+# No image tag, credential, bucket name, port, or worker size is hardcoded
+# here. Everything resolves from the stamped .env (scripts/sync_env.sh).
+#
+# extends: semantics honored explicitly:
+#   - networks and depends_on do NOT inherit; re-declared on every service.
+#   - volumes MERGE, so the lab-specific read-only mounts ADD to the base's
+#     ${SD411_JARS} mount and the spark-work named volume.
+#   - command REPLACES entirely, so minio-init restates bucket creation before
+#     running its own upstream-provisioning gate.
+#
+# Lab-specific addition: the provisioned Pageviews shard directory is mounted
+# READ ONLY into both the driver (spark-master) and the executor
+# (spark-worker) at the lab-scoped target /opt/lab10/pageviews. The streaming
+# file source reads a LOCAL path, so the same path must exist on every node
+# that runs a task. The target is lab-scoped on purpose: if the base already
+# mounts ${SD411_DATA} somewhere, this cannot collide with it.
+# =============================================================================
+name: lab10
+
+services:
+
+  spark-master:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: spark-master
+    networks: [sd411-net]
+    volumes:
+      - ./scripts:/opt/lab10/scripts:ro
+      - ${SD411_DATA}/pageviews:/opt/lab10/pageviews:ro
+    environment:
+      PV_DIR: ${PV_DIR:-file:///opt/lab10/pageviews}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_ENDPOINT: ${S3_ENDPOINT}
+      CHK_PREFIX: ${CHK_PREFIX:-chk/lab10}
+      ORACLE_PREFIX: ${ORACLE_PREFIX:-lab10/oracle}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MAX_FILES_PER_TRIGGER: ${MAX_FILES_PER_TRIGGER:-8}
+      TRIGGER_SECONDS: ${TRIGGER_SECONDS:-1}
+      PV_SESSION_MIN_VIEWS: ${PV_SESSION_MIN_VIEWS:-500}
+      # Must match the spark-work mount point in docker-compose.base.yml, or
+      # the metrics JSONL is written off-volume and lost on `down`.
+      SPARK_WORK_DIR: ${SPARK_WORK_DIR:-/opt/spark/work}
+    # Driver UI. VERIFIED: the base DOES publish ${PORT_DRIVER_UI} and
+    # ${PORT_DRIVER_UI_ALT} — `docker compose config` renders 4040 and 4041 on
+    # this service — so the block below stays commented out. Re-declaring them
+    # here would collide with the inherited mapping. Every measurement step in
+    # Parts 1, 2, and 4 reads the Structured Streaming tab, so if a future
+    # change to the base drops those ports, uncomment this.
+    # ports:
+    #   - "${PORT_DRIVER_UI}:${PORT_DRIVER_UI}"
+    #   - "${PORT_DRIVER_UI_ALT}:${PORT_DRIVER_UI_ALT}"
+
+  spark-worker:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: spark-worker
+    depends_on: [spark-master]
+    networks: [sd411-net]
+    volumes:
+      - ${SD411_DATA}/pageviews:/opt/lab10/pageviews:ro
+
+  minio:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: minio
+    networks: [sd411-net]
+
+  minio-init:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks: [sd411-net]
+    environment:
+      CHK_PREFIX: ${CHK_PREFIX:-chk/lab10}
+      PV_MIN_SHARDS: ${PV_MIN_SHARDS:-168}
+    # command REPLACES the base bucket-only command. Re-create both buckets,
+    # then run the provisioning gate: exit 64 is the distinct "the Pageviews
+    # shards were never provisioned on this VM" signal, which is a different
+    # failure from "MinIO is down" and must not be confused with it.
+    command:
+      - |
+        set -e
+        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        mc mb --ignore-existing "local/$${S3_BUCKET}"
+        mc mb --ignore-existing "local/$${S3_LANDING_BUCKET}"
+        if [ ! -d /seed/pageviews ]; then
+          echo "FATAL: /seed/pageviews missing. Run provision/prepare_pageviews.py on this VM."
+          exit 64
+        fi
+        SHARDS=$$(ls -1 /seed/pageviews/shard-*.parquet 2>/dev/null | wc -l)
+        if [ "$${SHARDS}" -lt "$${PV_MIN_SHARDS}" ]; then
+          echo "FATAL: found $${SHARDS} Pageviews shards, expected >= $${PV_MIN_SHARDS}."
+          exit 64
+        fi
+        if [ ! -f /seed/pageviews/_manifest.json ]; then
+          echo "FATAL: /seed/pageviews/_manifest.json missing; provisioning is incomplete."
+          exit 64
+        fi
+        echo "OK: $${SHARDS} Pageviews shards visible; buckets ready."
+    volumes:
+      - ${SD411_DATA}:/seed:ro
+
+networks:
+  sd411-net:
+
+volumes:
+  minio-data:
+  spark-work:
