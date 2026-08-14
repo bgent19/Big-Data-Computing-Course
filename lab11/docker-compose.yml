@@ -1,0 +1,137 @@
+# =============================================================================
+# SD411 lab11 - Streaming aggregation with state (R12, Thu 5 Nov 2026)
+#
+# The culminating Module 3 stack. It is the widest stack in the course because
+# the exactly-once story needs all three legs physically present at once:
+#   - a replayable source ......... the Kafka broker (inherited shape from lab09)
+#   - a durable checkpoint ........ MinIO (s3a://), so state survives the crash
+#   - a replayable Spark job ...... spark-master / spark-worker from the base
+#
+# Everything below is inherited from ../vm-base/docker-compose.base.yml except
+# the broker, which reuses lab09's broker verbatim so the KRaft config, the
+# user 0:0 fix, and the topic-list healthcheck stay in one shape across the two
+# Kafka labs. No image tag, credential, bucket, port, or worker size is
+# hardcoded here (audited: zero matches). The dollar-brace references resolve
+# from common.env after sync_env.sh stamps labN/.env; lab11 additionally
+# requires lab09's Kafka block already appended (see COMMON_ENV_ADDENDUM.md).
+# =============================================================================
+name: lab11
+
+services:
+
+  # --- Kafka broker (KRaft, single node, combined broker + controller) --------
+  # Reused from lab09 without change. Parts 0-4 all read from this topic through
+  # the Spark-Kafka connector, so unlike lab09 (where Parts 1-5 used the bundled
+  # CLI tools) the broker is on the critical path for the whole period.
+  broker:
+    image: ${KAFKA_IMAGE}
+    user: "0:0"                     # image runs UID 1000; cannot make its log dir on a root-owned volume
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@broker:9093"
+      KAFKA_LISTENERS: "PLAINTEXT://broker:9092,CONTROLLER://broker:9093,EXTERNAL://0.0.0.0:29092"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://broker:9092,EXTERNAL://localhost:29092"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_HEAP_OPTS: ${KAFKA_HEAP_OPTS}
+    ports:
+      - "${PORT_KAFKA_EXTERNAL}:29092"   # host-side clients during EI; students never need it
+    healthcheck:
+      # Alpine image ships sh, no curl and no bash. Ask the broker for a topic
+      # list instead of the /dev/tcp probe the Spark services use.
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server broker:9092 --list >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+    networks: [sd411-net]
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+      - ./scripts:/opt/lab11/scripts:ro
+
+  spark-master:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: spark-master
+    # extends does NOT inherit networks; declare it. volumes MERGE, so this ro
+    # scripts mount ADDS to the inherited extra-jars + spark-work volumes.
+    networks: [sd411-net]
+    depends_on:
+      broker:
+        condition: service_healthy
+    # The lab scripts read every knob from the environment, falling back to a
+    # built-in default. Without this block the container has NO LAB11_* names in
+    # it, so `docker compose exec spark-master spark-submit ...` silently runs on
+    # the Python defaults and common.env is not actually the source of truth it
+    # claims to be. `extends` MERGES environment, so PATH and SPARK_DAEMON_MEMORY
+    # from the base survive.
+    environment:
+      LAB11_TOPIC: ${LAB11_TOPIC}
+      LAB11_BROKER: ${LAB11_BROKER}
+      LAB11_WINDOW_SECONDS: ${LAB11_WINDOW_SECONDS}
+      LAB11_WATERMARK_SECONDS: ${LAB11_WATERMARK_SECONDS}
+      LAB11_MAX_OFFSETS_PER_TRIGGER: ${LAB11_MAX_OFFSETS_PER_TRIGGER}
+      LAB11_DROPS_MAX_OFFSETS: ${LAB11_DROPS_MAX_OFFSETS}
+      LAB11_SHUFFLE_PARTITIONS: ${LAB11_SHUFFLE_PARTITIONS}
+      LAB11_CRASH_BATCH: ${LAB11_CRASH_BATCH}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_ENDPOINT: ${S3_ENDPOINT}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - ./scripts:/opt/lab11/scripts:ro
+    # The driver renders the Structured Streaming tab here. Parts 1, 2, and 4
+    # all read it, so uncomment if the base does not already publish these.
+    # ports:
+    #   - "${PORT_DRIVER_UI}:4040"
+    #   - "${PORT_DRIVER_UI_ALT}:4041"
+
+  spark-worker:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: spark-worker
+    depends_on: [spark-master]      # not inherited; declare it
+    networks: [sd411-net]
+
+  minio:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: minio
+    networks: [sd411-net]
+
+  minio-init:
+    extends:
+      file: ../vm-base/docker-compose.base.yml
+      service: minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks: [sd411-net]
+    # command REPLACES the base (bucket-only) command. lab11 writes checkpoints
+    # and sink output under the main bucket at runtime; here we only guarantee
+    # the buckets exist and clear any checkpoint/sink left by a prior run so a
+    # fresh class starts from an empty state. No upstream-lab object is seeded:
+    # lab11 has no lab06 fact dependency (it feeds Kafka from the CSV seed).
+    command:
+      - |
+        set -e
+        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        mc mb --ignore-existing "local/$${S3_BUCKET}"
+        mc mb --ignore-existing "local/$${S3_LANDING_BUCKET}"
+        mc rm -r --force "local/$${S3_BUCKET}/checkpoints/lab11" 2>/dev/null || true
+        mc rm -r --force "local/$${S3_BUCKET}/lab11" 2>/dev/null || true
+    volumes:
+      - ${SD411_DATA}:/seed:ro
+
+networks:
+  sd411-net:
+
+volumes:
+  minio-data:
+  spark-work:
+  kafka-data:
