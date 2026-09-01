@@ -46,31 +46,7 @@ turns a late, confusing failure into an early, obvious one.
 
 ---
 
-## 2. Enterprise TLS trust *(conditional — skip on ordinary networks)*
-
-**Goal.** If the network intercepts TLS, install the intercepting root CA into
-**every** trust store on the machine, not just the OS one:
-
-1. the OS trust store,
-2. Python's `certifi` bundle (used by `requests`, `pip`, and `pybaseball`), and
-3. the JVM trust store inside any container that makes TLS calls — either bake
-   the CA into a derived image or bind-mount the bundle at run time.
-
-**Why.** These three stores are independent. Fixing only the OS store produces
-the classic symptom: `curl` works, Python and Spark still fail with certificate
-errors.
-
-**Done when.** An HTTPS fetch of an external host succeeds from the shell, from
-Python (`requests.get`), and from inside a container.
-
-**Skip this step entirely** on a normal network — `provision_ubuntu_vm.sh`
-omits it. On an intercepting network you must supply this stage yourself; it is
-the one part of provisioning that is specific to your institution's network
-rather than to the labs.
-
----
-
-## 3. Container runtime
+## 2. Container runtime
 
 **Goal.** Install a container engine and a Compose v2–compatible tool, enable
 the engine to start at boot, and grant the login user permission to talk to the
@@ -87,7 +63,7 @@ fresh shell session to take effect.
 
 ---
 
-## 4. Shared Python environment
+## 3. Shared Python environment
 
 **Goal.** Create an isolated Python environment under `${SD411_HOME}/venv` and
 install the data-analysis dependencies (`pybaseball`, `pyarrow`, `pandas`) into
@@ -103,7 +79,7 @@ pybaseball"` exits 0.
 
 ---
 
-## 5. On-disk layout and lab repository
+## 4. On-disk layout and lab repository
 
 **Goal.** Create the directory tree the labs assume and place the lab repository
 inside it:
@@ -124,7 +100,7 @@ login user, not root.
 
 ---
 
-## 6. Stage connector JARs
+## 5. Stage connector JARs
 
 **Goal.** Download the Spark connector JARs (S3A/Hadoop-AWS and Spark-Kafka,
 matched to the pinned Spark version) into `${SD411_JARS}`, on the host, at
@@ -144,7 +120,7 @@ non-zero size.
 
 ---
 
-## 7. Pre-pull pinned container images
+## 6. Pre-pull pinned container images
 
 **Goal.** Pull every image tag listed in `common.env` — Spark, Hadoop, MinIO,
 the MinIO client, and Kafka — so they sit in the local image cache.
@@ -161,7 +137,7 @@ than deferring the failure to a student mid-lab.
 
 ---
 
-## 8. Seed the primary dataset
+## 7. Seed the primary dataset
 
 **Goal.** Produce the shared season CSV under `${SD411_DATA}`, fetching the real
 dataset when the network allows and falling back to a synthetic generator with
@@ -176,7 +152,7 @@ the labs expect.
 
 ---
 
-## 9. Stage the streaming replay source
+## 8. Stage the streaming replay source
 
 **Goal.** Fetch the pinned GitHub Archive hour into `${SD411_DATA}/gharchive/`
 and convert it once into the replay file `${STREAM_DIR}/${STREAM_FILE}`. Fall
@@ -192,7 +168,7 @@ user.
 
 ---
 
-## 10. Distribute configuration to each lab
+## 9. Distribute configuration to each lab
 
 **Goal.** Stamp the canonical values from `common.env` into a per-lab
 environment file in every lab directory in the repository.
@@ -206,7 +182,7 @@ values match `common.env`.
 
 ---
 
-## 11. Fix scratch-directory ownership
+## 10. Fix scratch-directory ownership
 
 **Goal.** For any lab that bind-mounts a host scratch directory, create it and
 give it to the login user **before** the first container start.
@@ -221,7 +197,7 @@ user.
 
 ---
 
-## 12. Verify, then capture the image
+## 11. Verify, then capture the image
 
 **Goal.** Run the verification pass **as the login user, not as root**, then
 tear down cleanly before snapshotting or exporting.
